@@ -12,14 +12,42 @@ import (
 )
 
 func Test_generateRecordSetName(t *testing.T) {
-	t.Run("fqdn=test.example.com.", func(t *testing.T) {
+	t.Run("name=\"\"", func(t *testing.T) {
+		got := generateRecordSetName("", "example.com.")
+		want := "@"
+		if diff := cmp.Diff(got, want); diff != "" {
+			t.Errorf("diff: %s", diff)
+		}
+	})
+	t.Run("name=@", func(t *testing.T) {
+		got := generateRecordSetName("@", "example.com.")
+		want := "@"
+		if diff := cmp.Diff(got, want); diff != "" {
+			t.Errorf("diff: %s", diff)
+		}
+	})
+	t.Run("name=test", func(t *testing.T) {
+		got := generateRecordSetName("test", "example.com.")
+		want := "test"
+		if diff := cmp.Diff(got, want); diff != "" {
+			t.Errorf("diff: %s", diff)
+		}
+	})
+	t.Run("name=test.example.com", func(t *testing.T) {
+		got := generateRecordSetName("test.example.com", "example.com.")
+		want := "test"
+		if diff := cmp.Diff(got, want); diff != "" {
+			t.Errorf("diff: %s", diff)
+		}
+	})
+	t.Run("name=test.example.com.", func(t *testing.T) {
 		got := generateRecordSetName("test.example.com.", "example.com.")
 		want := "test"
 		if diff := cmp.Diff(got, want); diff != "" {
 			t.Errorf("diff: %s", diff)
 		}
 	})
-	t.Run("fqdn=example.com.", func(t *testing.T) {
+	t.Run("name=example.com.", func(t *testing.T) {
 		got := generateRecordSetName("example.com.", "example.com.")
 		want := "@"
 		if diff := cmp.Diff(got, want); diff != "" {
@@ -59,7 +87,7 @@ func Test_convertAzureRecordSetsToLibdnsRecords(t *testing.T) {
 				Etag: to.StringPtr("ETAG_A"),
 				RecordSetProperties: &dns.RecordSetProperties{
 					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("test.example.com."),
+					Fqdn: to.StringPtr("record-a.example.com."),
 					ARecords: &[]dns.ARecord{
 						dns.ARecord{
 							Ipv4Address: to.StringPtr("127.0.0.1"),
@@ -210,77 +238,77 @@ func Test_convertAzureRecordSetsToLibdnsRecords(t *testing.T) {
 			libdns.Record{
 				ID:    "ETAG_A",
 				Type:  "A",
-				Name:  "test.example.com.",
+				Name:  "record-a",
 				Value: "127.0.0.1",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_AAAA",
 				Type:  "AAAA",
-				Name:  "record-aaaa.example.com.",
+				Name:  "record-aaaa",
 				Value: "::1",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_CAA",
 				Type:  "CAA",
-				Name:  "record-caa.example.com.",
+				Name:  "record-caa",
 				Value: "0 issue ca.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_CNAME",
 				Type:  "CNAME",
-				Name:  "record-cname.example.com.",
+				Name:  "record-cname",
 				Value: "www.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_MX",
 				Type:  "MX",
-				Name:  "record-mx.example.com.",
+				Name:  "record-mx",
 				Value: "10 mail.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_NS",
 				Type:  "NS",
-				Name:  "example.com.",
+				Name:  "@",
 				Value: "ns1.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_NS",
 				Type:  "NS",
-				Name:  "example.com.",
+				Name:  "@",
 				Value: "ns2.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_PTR",
 				Type:  "PTR",
-				Name:  "record-ptr.example.com.",
+				Name:  "record-ptr",
 				Value: "hoge.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_SOA",
 				Type:  "SOA",
-				Name:  "example.com.",
+				Name:  "@",
 				Value: "ns1.example.com hostmaster.example.com 1 7200 900 1209600 86400",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_SRV",
 				Type:  "SRV",
-				Name:  "record-srv.example.com.",
+				Name:  "record-srv",
 				Value: "1 10 5269 app.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_TXT",
 				Type:  "TXT",
-				Name:  "record-txt.example.com.",
+				Name:  "record-txt",
 				Value: "TEST VALUE",
 				TTL:   time.Duration(30) * time.Second,
 			},
@@ -310,70 +338,70 @@ func Test_convertLibdnsRecordToAzureRecordSet(t *testing.T) {
 			libdns.Record{
 				ID:    "ETAG_A",
 				Type:  "A",
-				Name:  "test.example.com.",
+				Name:  "record-a",
 				Value: "127.0.0.1",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_AAAA",
 				Type:  "AAAA",
-				Name:  "record-aaaa.example.com.",
+				Name:  "record-aaaa",
 				Value: "::1",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_CAA",
 				Type:  "CAA",
-				Name:  "record-caa.example.com.",
+				Name:  "record-caa",
 				Value: "0 issue ca.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_CNAME",
 				Type:  "CNAME",
-				Name:  "record-cname.example.com.",
+				Name:  "record-cname",
 				Value: "www.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_MX",
 				Type:  "MX",
-				Name:  "record-mx.example.com.",
+				Name:  "record-mx",
 				Value: "10 mail.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_NS",
 				Type:  "NS",
-				Name:  "example.com.",
+				Name:  "@",
 				Value: "ns1.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_PTR",
 				Type:  "PTR",
-				Name:  "record-ptr.example.com.",
+				Name:  "record-ptr",
 				Value: "hoge.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_SOA",
 				Type:  "SOA",
-				Name:  "example.com.",
+				Name:  "@",
 				Value: "ns1.example.com hostmaster.example.com 1 7200 900 1209600 86400",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_SRV",
 				Type:  "SRV",
-				Name:  "record-srv.example.com.",
+				Name:  "record-srv",
 				Value: "1 10 5269 app.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
 			libdns.Record{
 				ID:    "ETAG_TXT",
 				Type:  "TXT",
-				Name:  "record-txt.example.com.",
+				Name:  "record-txt",
 				Value: "TEST VALUE",
 				TTL:   time.Duration(30) * time.Second,
 			},

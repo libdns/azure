@@ -148,10 +148,8 @@ func (p *Provider) createOrUpdateRecord(ctx context.Context, zone string, record
 }
 
 // generateRecordSetName generates name for RecordSet object.
-func generateRecordSetName(fqdn string, zone string) string {
-	recordSetName := fqdn
-	recordSetName = recordSetName[:len(recordSetName)-len(zone)]
-	recordSetName = strings.TrimSuffix(recordSetName, ".")
+func generateRecordSetName(name string, zone string) string {
+	recordSetName := libdns.RelativeName(strings.TrimSuffix(name, ".")+".", zone)
 	if recordSetName == "" {
 		return "@"
 	}
@@ -197,7 +195,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
-					Name:  *recordSet.Fqdn,
+					Name:  *recordSet.Name,
 					Value: *v.Ipv4Address,
 					TTL:   time.Duration(*recordSet.TTL) * time.Second,
 				}
@@ -208,7 +206,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
-					Name:  *recordSet.Fqdn,
+					Name:  *recordSet.Name,
 					Value: *v.Ipv6Address,
 					TTL:   time.Duration(*recordSet.TTL) * time.Second,
 				}
@@ -219,7 +217,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
-					Name:  *recordSet.Fqdn,
+					Name:  *recordSet.Name,
 					Value: strings.Join([]string{fmt.Sprint(*v.Flags), *v.Tag, *v.Value}, " "),
 					TTL:   time.Duration(*recordSet.TTL) * time.Second,
 				}
@@ -229,7 +227,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 			record := libdns.Record{
 				ID:    *recordSet.Etag,
 				Type:  typeName,
-				Name:  *recordSet.Fqdn,
+				Name:  *recordSet.Name,
 				Value: *recordSet.CnameRecord.Cname,
 				TTL:   time.Duration(*recordSet.TTL) * time.Second,
 			}
@@ -239,7 +237,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
-					Name:  *recordSet.Fqdn,
+					Name:  *recordSet.Name,
 					Value: strings.Join([]string{fmt.Sprint(*v.Preference), *v.Exchange}, " "),
 					TTL:   time.Duration(*recordSet.TTL) * time.Second,
 				}
@@ -250,7 +248,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
-					Name:  *recordSet.Fqdn,
+					Name:  *recordSet.Name,
 					Value: *v.Nsdname,
 					TTL:   time.Duration(*recordSet.TTL) * time.Second,
 				}
@@ -261,7 +259,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
-					Name:  *recordSet.Fqdn,
+					Name:  *recordSet.Name,
 					Value: *v.Ptrdname,
 					TTL:   time.Duration(*recordSet.TTL) * time.Second,
 				}
@@ -271,7 +269,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 			record := libdns.Record{
 				ID:    *recordSet.Etag,
 				Type:  typeName,
-				Name:  *recordSet.Fqdn,
+				Name:  *recordSet.Name,
 				Value: strings.Join([]string{*recordSet.SoaRecord.Host, *recordSet.SoaRecord.Email, fmt.Sprint(*recordSet.SoaRecord.SerialNumber), fmt.Sprint(*recordSet.SoaRecord.RefreshTime), fmt.Sprint(*recordSet.SoaRecord.RetryTime), fmt.Sprint(*recordSet.SoaRecord.ExpireTime), fmt.Sprint(*recordSet.SoaRecord.MinimumTTL)}, " "),
 				TTL:   time.Duration(*recordSet.TTL) * time.Second,
 			}
@@ -281,7 +279,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
-					Name:  *recordSet.Fqdn,
+					Name:  *recordSet.Name,
 					Value: strings.Join([]string{fmt.Sprint(*v.Priority), fmt.Sprint(*v.Weight), fmt.Sprint(*v.Port), *v.Target}, " "),
 					TTL:   time.Duration(*recordSet.TTL) * time.Second,
 				}
@@ -293,7 +291,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 					record := libdns.Record{
 						ID:    *recordSet.Etag,
 						Type:  typeName,
-						Name:  *recordSet.Fqdn,
+						Name:  *recordSet.Name,
 						Value: txt,
 						TTL:   time.Duration(*recordSet.TTL) * time.Second,
 					}
