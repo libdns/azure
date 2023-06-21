@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/dns/mgmt/2018-05-01/dns"
-	"github.com/Azure/go-autorest/autorest/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/dns/armdns"
+
 	"github.com/google/go-cmp/cmp"
 	"github.com/libdns/libdns"
 )
@@ -62,7 +63,7 @@ func Test_convertStringToRecordType(t *testing.T) {
 		t.Run("type="+typeName, func(t *testing.T) {
 			recordType, _ := convertStringToRecordType(typeName)
 			got := fmt.Sprintf("%T:%v", recordType, recordType)
-			want := "dns.RecordType:" + typeName
+			want := "armdns.RecordType:" + typeName
 			if diff := cmp.Diff(got, want); diff != "" {
 				t.Errorf("diff: %s", diff)
 			}
@@ -80,232 +81,219 @@ func Test_convertStringToRecordType(t *testing.T) {
 
 func Test_convertAzureRecordSetsToLibdnsRecords(t *testing.T) {
 	t.Run("type=supported", func(t *testing.T) {
-		azureRecordSets := []*dns.RecordSet{
-			&dns.RecordSet{
-				Name: to.StringPtr("record-a"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/A"),
-				Etag: to.StringPtr("ETAG_A"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("record-a.example.com."),
-					ARecords: &[]dns.ARecord{
-						dns.ARecord{
-							Ipv4Address: to.StringPtr("127.0.0.1"),
+		azureRecordSets := []*armdns.RecordSet{
+			{
+				Name: to.Ptr("record-a"),
+				Type: to.Ptr("Microsoft.Network/dnszones/A"),
+				Etag: to.Ptr("ETAG_A"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("record-a.example.com."),
+					ARecords: []*armdns.ARecord{
+						{
+							IPv4Address: to.Ptr("127.0.0.1"),
 						},
 					},
 				},
 			},
-			&dns.RecordSet{
-				Name: to.StringPtr("record-aaaa"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/AAAA"),
-				Etag: to.StringPtr("ETAG_AAAA"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("record-aaaa.example.com."),
-					AaaaRecords: &[]dns.AaaaRecord{
-						dns.AaaaRecord{
-							Ipv6Address: to.StringPtr("::1"),
+			{
+				Name: to.Ptr("record-aaaa"),
+				Type: to.Ptr("Microsoft.Network/dnszones/AAAA"),
+				Etag: to.Ptr("ETAG_AAAA"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("record-aaaa.example.com."),
+					AaaaRecords: []*armdns.AaaaRecord{{
+						IPv6Address: to.Ptr("::1"),
+					}},
+				},
+			},
+			{
+				Name: to.Ptr("record-caa"),
+				Type: to.Ptr("Microsoft.Network/dnszones/CAA"),
+				Etag: to.Ptr("ETAG_CAA"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("record-caa.example.com."),
+					CaaRecords: []*armdns.CaaRecord{{
+						Flags: to.Ptr[int32](0),
+						Tag:   to.Ptr("issue"),
+						Value: to.Ptr("ca.example.com"),
+					}},
+				},
+			},
+			{
+				Name: to.Ptr("record-cname"),
+				Type: to.Ptr("Microsoft.Network/dnszones/CNAME"),
+				Etag: to.Ptr("ETAG_CNAME"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("record-cname.example.com."),
+					CnameRecord: &armdns.CnameRecord{
+						Cname: to.Ptr("www.example.com"),
+					},
+				},
+			},
+			{
+				Name: to.Ptr("record-mx"),
+				Type: to.Ptr("Microsoft.Network/dnszones/MX"),
+				Etag: to.Ptr("ETAG_MX"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("record-mx.example.com."),
+					MxRecords: []*armdns.MxRecord{{
+						Preference: to.Ptr[int32](10),
+						Exchange:   to.Ptr("mail.example.com"),
+					}},
+				},
+			},
+			{
+				Name: to.Ptr("@"),
+				Type: to.Ptr("Microsoft.Network/dnszones/NS"),
+				Etag: to.Ptr("ETAG_NS"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("example.com."),
+					NsRecords: []*armdns.NsRecord{
+						{
+							Nsdname: to.Ptr("ns1.example.com"),
+						},
+						{
+							Nsdname: to.Ptr("ns2.example.com"),
 						},
 					},
 				},
 			},
-			&dns.RecordSet{
-				Name: to.StringPtr("record-caa"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/CAA"),
-				Etag: to.StringPtr("ETAG_CAA"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("record-caa.example.com."),
-					CaaRecords: &[]dns.CaaRecord{
-						dns.CaaRecord{
-							Flags: to.Int32Ptr(0),
-							Tag:   to.StringPtr("issue"),
-							Value: to.StringPtr("ca.example.com"),
-						},
+			{
+				Name: to.Ptr("record-ptr"),
+				Type: to.Ptr("Microsoft.Network/dnszones/PTR"),
+				Etag: to.Ptr("ETAG_PTR"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("record-ptr.example.com."),
+					PtrRecords: []*armdns.PtrRecord{{
+						Ptrdname: to.Ptr("hoge.example.com"),
+					}},
+				},
+			}, {
+				Name: to.Ptr("@"),
+				Type: to.Ptr("Microsoft.Network/dnszones/SOA"),
+				Etag: to.Ptr("ETAG_SOA"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("example.com."),
+					SoaRecord: &armdns.SoaRecord{
+						Host:         to.Ptr("ns1.example.com"),
+						Email:        to.Ptr("hostmaster.example.com"),
+						SerialNumber: to.Ptr[int64](1),
+						RefreshTime:  to.Ptr[int64](7200),
+						RetryTime:    to.Ptr[int64](900),
+						ExpireTime:   to.Ptr[int64](1209600),
+						MinimumTTL:   to.Ptr[int64](86400),
 					},
 				},
 			},
-			&dns.RecordSet{
-				Name: to.StringPtr("record-cname"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/CNAME"),
-				Etag: to.StringPtr("ETAG_CNAME"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("record-cname.example.com."),
-					CnameRecord: &dns.CnameRecord{
-						Cname: to.StringPtr("www.example.com"),
-					},
+			{
+				Name: to.Ptr("record-srv"),
+				Type: to.Ptr("Microsoft.Network/dnszones/SRV"),
+				Etag: to.Ptr("ETAG_SRV"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("record-srv.example.com."),
+					SrvRecords: []*armdns.SrvRecord{{
+						Priority: to.Ptr[int32](1),
+						Weight:   to.Ptr[int32](10),
+						Port:     to.Ptr[int32](5269),
+						Target:   to.Ptr("app.example.com"),
+					}},
 				},
 			},
-			&dns.RecordSet{
-				Name: to.StringPtr("record-mx"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/MX"),
-				Etag: to.StringPtr("ETAG_MX"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("record-mx.example.com."),
-					MxRecords: &[]dns.MxRecord{
-						dns.MxRecord{
-							Preference: to.Int32Ptr(10),
-							Exchange:   to.StringPtr("mail.example.com"),
-						},
-					},
-				},
-			},
-			&dns.RecordSet{
-				Name: to.StringPtr("@"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/NS"),
-				Etag: to.StringPtr("ETAG_NS"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("example.com."),
-					NsRecords: &[]dns.NsRecord{
-						dns.NsRecord{
-							Nsdname: to.StringPtr("ns1.example.com"),
-						},
-						dns.NsRecord{
-							Nsdname: to.StringPtr("ns2.example.com"),
-						},
-					},
-				},
-			},
-			&dns.RecordSet{
-				Name: to.StringPtr("record-ptr"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/PTR"),
-				Etag: to.StringPtr("ETAG_PTR"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("record-ptr.example.com."),
-					PtrRecords: &[]dns.PtrRecord{
-						dns.PtrRecord{
-							Ptrdname: to.StringPtr("hoge.example.com"),
-						},
-					},
-				},
-			},
-			&dns.RecordSet{
-				Name: to.StringPtr("@"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/SOA"),
-				Etag: to.StringPtr("ETAG_SOA"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("example.com."),
-					SoaRecord: &dns.SoaRecord{
-						Host:         to.StringPtr("ns1.example.com"),
-						Email:        to.StringPtr("hostmaster.example.com"),
-						SerialNumber: to.Int64Ptr(1),
-						RefreshTime:  to.Int64Ptr(7200),
-						RetryTime:    to.Int64Ptr(900),
-						ExpireTime:   to.Int64Ptr(1209600),
-						MinimumTTL:   to.Int64Ptr(86400),
-					},
-				},
-			},
-			&dns.RecordSet{
-				Name: to.StringPtr("record-srv"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/SRV"),
-				Etag: to.StringPtr("ETAG_SRV"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("record-srv.example.com."),
-					SrvRecords: &[]dns.SrvRecord{
-						dns.SrvRecord{
-							Priority: to.Int32Ptr(1),
-							Weight:   to.Int32Ptr(10),
-							Port:     to.Int32Ptr(5269),
-							Target:   to.StringPtr("app.example.com"),
-						},
-					},
-				},
-			},
-			&dns.RecordSet{
-				Name: to.StringPtr("record-txt"),
-				Type: to.StringPtr("Microsoft.Network/dnszones/TXT"),
-				Etag: to.StringPtr("ETAG_TXT"),
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL:  to.Int64Ptr(30),
-					Fqdn: to.StringPtr("record-txt.example.com."),
-					TxtRecords: &[]dns.TxtRecord{
-						dns.TxtRecord{
-							Value: &[]string{"TEST VALUE"},
-						},
-					},
+			{
+				Name: to.Ptr("record-txt"),
+				Type: to.Ptr("Microsoft.Network/dnszones/TXT"),
+				Etag: to.Ptr("ETAG_TXT"),
+				Properties: &armdns.RecordSetProperties{
+					TTL:  to.Ptr[int64](30),
+					Fqdn: to.Ptr("record-txt.example.com."),
+					TxtRecords: []*armdns.TxtRecord{{
+						Value: []*string{to.Ptr("TEST VALUE")},
+					}},
 				},
 			},
 		}
 		got, _ := convertAzureRecordSetsToLibdnsRecords(azureRecordSets)
 		want := []libdns.Record{
-			libdns.Record{
+			{
 				ID:    "ETAG_A",
 				Type:  "A",
 				Name:  "record-a",
 				Value: "127.0.0.1",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_AAAA",
 				Type:  "AAAA",
 				Name:  "record-aaaa",
 				Value: "::1",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_CAA",
 				Type:  "CAA",
 				Name:  "record-caa",
 				Value: "0 issue ca.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_CNAME",
 				Type:  "CNAME",
 				Name:  "record-cname",
 				Value: "www.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_MX",
 				Type:  "MX",
 				Name:  "record-mx",
 				Value: "10 mail.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_NS",
 				Type:  "NS",
 				Name:  "@",
 				Value: "ns1.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_NS",
 				Type:  "NS",
 				Name:  "@",
 				Value: "ns2.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_PTR",
 				Type:  "PTR",
 				Name:  "record-ptr",
 				Value: "hoge.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_SOA",
 				Type:  "SOA",
 				Name:  "@",
 				Value: "ns1.example.com hostmaster.example.com 1 7200 900 1209600 86400",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_SRV",
 				Type:  "SRV",
 				Name:  "record-srv",
 				Value: "1 10 5269 app.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_TXT",
 				Type:  "TXT",
 				Name:  "record-txt",
@@ -318,11 +306,9 @@ func Test_convertAzureRecordSetsToLibdnsRecords(t *testing.T) {
 		}
 	})
 	t.Run("type=unsupported", func(t *testing.T) {
-		azureRecordSets := []*dns.RecordSet{
-			&dns.RecordSet{
-				Type: to.StringPtr("Microsoft.Network/dnszones/ERR"),
-			},
-		}
+		azureRecordSets := []*armdns.RecordSet{{
+			Type: to.Ptr("Microsoft.Network/dnszones/ERR"),
+		}}
 		_, err := convertAzureRecordSetsToLibdnsRecords(azureRecordSets)
 		got := err.Error()
 		want := "The type ERR cannot be interpreted."
@@ -335,70 +321,70 @@ func Test_convertAzureRecordSetsToLibdnsRecords(t *testing.T) {
 func Test_convertLibdnsRecordToAzureRecordSet(t *testing.T) {
 	t.Run("type=supported", func(t *testing.T) {
 		libdnsRecords := []libdns.Record{
-			libdns.Record{
+			{
 				ID:    "ETAG_A",
 				Type:  "A",
 				Name:  "record-a",
 				Value: "127.0.0.1",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_AAAA",
 				Type:  "AAAA",
 				Name:  "record-aaaa",
 				Value: "::1",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_CAA",
 				Type:  "CAA",
 				Name:  "record-caa",
 				Value: "0 issue ca.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_CNAME",
 				Type:  "CNAME",
 				Name:  "record-cname",
 				Value: "www.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_MX",
 				Type:  "MX",
 				Name:  "record-mx",
 				Value: "10 mail.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_NS",
 				Type:  "NS",
 				Name:  "@",
 				Value: "ns1.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_PTR",
 				Type:  "PTR",
 				Name:  "record-ptr",
 				Value: "hoge.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_SOA",
 				Type:  "SOA",
 				Name:  "@",
 				Value: "ns1.example.com hostmaster.example.com 1 7200 900 1209600 86400",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_SRV",
 				Type:  "SRV",
 				Name:  "record-srv",
 				Value: "1 10 5269 app.example.com",
 				TTL:   time.Duration(30) * time.Second,
 			},
-			libdns.Record{
+			{
 				ID:    "ETAG_TXT",
 				Type:  "TXT",
 				Name:  "record-txt",
@@ -406,118 +392,102 @@ func Test_convertLibdnsRecordToAzureRecordSet(t *testing.T) {
 				TTL:   time.Duration(30) * time.Second,
 			},
 		}
-		var got []dns.RecordSet
+		var got []armdns.RecordSet
 		for _, libdnsRecord := range libdnsRecords {
 			convertedRecord, _ := convertLibdnsRecordToAzureRecordSet(libdnsRecord)
 			got = append(got, convertedRecord)
 		}
-		want := []dns.RecordSet{
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					ARecords: &[]dns.ARecord{
-						dns.ARecord{
-							Ipv4Address: to.StringPtr("127.0.0.1"),
-						},
+		want := []armdns.RecordSet{
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					ARecords: []*armdns.ARecord{{
+						IPv4Address: to.Ptr("127.0.0.1"),
+					}},
+				},
+			},
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					AaaaRecords: []*armdns.AaaaRecord{{
+						IPv6Address: to.Ptr("::1"),
+					}},
+				},
+			},
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					CaaRecords: []*armdns.CaaRecord{{
+						Flags: to.Ptr[int32](0),
+						Tag:   to.Ptr("issue"),
+						Value: to.Ptr("ca.example.com"),
+					}},
+				},
+			},
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					CnameRecord: &armdns.CnameRecord{
+						Cname: to.Ptr("www.example.com"),
 					},
 				},
 			},
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					AaaaRecords: &[]dns.AaaaRecord{
-						dns.AaaaRecord{
-							Ipv6Address: to.StringPtr("::1"),
-						},
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					MxRecords: []*armdns.MxRecord{{
+						Preference: to.Ptr[int32](10),
+						Exchange:   to.Ptr("mail.example.com"),
+					}},
+				},
+			},
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					NsRecords: []*armdns.NsRecord{{
+						Nsdname: to.Ptr("ns1.example.com"),
+					}},
+				},
+			},
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					PtrRecords: []*armdns.PtrRecord{{
+						Ptrdname: to.Ptr("hoge.example.com"),
+					}},
+				},
+			},
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					SoaRecord: &armdns.SoaRecord{
+						Host:         to.Ptr("ns1.example.com"),
+						Email:        to.Ptr("hostmaster.example.com"),
+						SerialNumber: to.Ptr[int64](1),
+						RefreshTime:  to.Ptr[int64](7200),
+						RetryTime:    to.Ptr[int64](900),
+						ExpireTime:   to.Ptr[int64](1209600),
+						MinimumTTL:   to.Ptr[int64](86400),
 					},
 				},
 			},
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					CaaRecords: &[]dns.CaaRecord{
-						dns.CaaRecord{
-							Flags: to.Int32Ptr(0),
-							Tag:   to.StringPtr("issue"),
-							Value: to.StringPtr("ca.example.com"),
-						},
-					},
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					SrvRecords: []*armdns.SrvRecord{{
+						Priority: to.Ptr[int32](1),
+						Weight:   to.Ptr[int32](10),
+						Port:     to.Ptr[int32](5269),
+						Target:   to.Ptr("app.example.com"),
+					}},
 				},
 			},
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					CnameRecord: &dns.CnameRecord{
-						Cname: to.StringPtr("www.example.com"),
-					},
-				},
-			},
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					MxRecords: &[]dns.MxRecord{
-						dns.MxRecord{
-							Preference: to.Int32Ptr(10),
-							Exchange:   to.StringPtr("mail.example.com"),
-						},
-					},
-				},
-			},
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					NsRecords: &[]dns.NsRecord{
-						dns.NsRecord{
-							Nsdname: to.StringPtr("ns1.example.com"),
-						},
-					},
-				},
-			},
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					PtrRecords: &[]dns.PtrRecord{
-						dns.PtrRecord{
-							Ptrdname: to.StringPtr("hoge.example.com"),
-						},
-					},
-				},
-			},
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					SoaRecord: &dns.SoaRecord{
-						Host:         to.StringPtr("ns1.example.com"),
-						Email:        to.StringPtr("hostmaster.example.com"),
-						SerialNumber: to.Int64Ptr(1),
-						RefreshTime:  to.Int64Ptr(7200),
-						RetryTime:    to.Int64Ptr(900),
-						ExpireTime:   to.Int64Ptr(1209600),
-						MinimumTTL:   to.Int64Ptr(86400),
-					},
-				},
-			},
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					SrvRecords: &[]dns.SrvRecord{
-						dns.SrvRecord{
-							Priority: to.Int32Ptr(1),
-							Weight:   to.Int32Ptr(10),
-							Port:     to.Int32Ptr(5269),
-							Target:   to.StringPtr("app.example.com"),
-						},
-					},
-				},
-			},
-			dns.RecordSet{
-				RecordSetProperties: &dns.RecordSetProperties{
-					TTL: to.Int64Ptr(30),
-					TxtRecords: &[]dns.TxtRecord{
-						dns.TxtRecord{
-							Value: &[]string{"TEST VALUE"},
-						},
-					},
+			{
+				Properties: &armdns.RecordSetProperties{
+					TTL: to.Ptr[int64](30),
+					TxtRecords: []*armdns.TxtRecord{{
+						Value: []*string{to.Ptr("TEST VALUE")},
+					}},
 				},
 			},
 		}
@@ -526,11 +496,9 @@ func Test_convertLibdnsRecordToAzureRecordSet(t *testing.T) {
 		}
 	})
 	t.Run("type=unsupported", func(t *testing.T) {
-		libdnsRecords := []libdns.Record{
-			libdns.Record{
-				Type: "ERR",
-			},
-		}
+		libdnsRecords := []libdns.Record{{
+			Type: "ERR",
+		}}
 		_, err := convertLibdnsRecordToAzureRecordSet(libdnsRecords[0])
 		got := err.Error()
 		want := "The type ERR cannot be interpreted."

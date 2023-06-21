@@ -8,32 +8,31 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/dns/mgmt/2018-05-01/dns"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/Azure/go-autorest/autorest/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/dns/armdns"
 
 	"github.com/libdns/libdns"
 )
 
 // Client is an abstraction of RecordSetsClient for Azure DNS
 type Client struct {
-	azureClient *dns.RecordSetsClient
+	azureClient *armdns.RecordSetsClient
 	mutex       sync.Mutex
 }
 
 // setupClient invokes authentication and store client to the provider instance.
 func (p *Provider) setupClient() error {
 	if p.client.azureClient == nil {
-		recordSetsClient := dns.NewRecordSetsClient(p.SubscriptionId)
-
-		clientCredentialsConfig := auth.NewClientCredentialsConfig(p.ClientId, p.ClientSecret, p.TenantId)
-		authorizer, err := clientCredentialsConfig.Authorizer()
+		clientCredential, err := azidentity.NewClientSecretCredential(p.TenantId, p.ClientId, p.ClientSecret, nil)
 		if err != nil {
 			return err
 		}
-
-		recordSetsClient.Authorizer = authorizer
-		p.client.azureClient = &recordSetsClient
+		clientFactory, err := armdns.NewClientFactory(p.SubscriptionId, clientCredential, nil)
+		if err != nil {
+			return err
+		}
+		p.client.azureClient = clientFactory.NewRecordSetsClient()
 	}
 
 	return nil
@@ -48,25 +47,24 @@ func (p *Provider) getRecords(ctx context.Context, zone string) ([]libdns.Record
 		return nil, err
 	}
 
-	var recordSets []*dns.RecordSet
+	var recordSets []*armdns.RecordSet
 
-	pages, err := p.client.azureClient.ListAllByDNSZone(
-		ctx,
+	pager := p.client.azureClient.NewListByDNSZonePager(
 		p.ResourceGroupName,
 		strings.TrimSuffix(zone, "."),
-		to.Int32Ptr(1000),
-		"")
-	if err != nil {
-		return nil, err
-	}
+		&armdns.RecordSetsClientListByDNSZoneOptions{
+			Top:                 nil,
+			Recordsetnamesuffix: nil,
+		})
 
-	for pages.NotDone() {
-		recordSetsList := pages.Response()
-		for _, v := range *recordSetsList.Value {
-			recordSet := v
-			recordSets = append(recordSets, &recordSet)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, err
 		}
-		pages.NextWithContext(ctx)
+		for _, v := range page.Value {
+			recordSets = append(recordSets, v)
+		}
 	}
 
 	records, _ := convertAzureRecordSetsToLibdnsRecords(recordSets)
@@ -101,7 +99,9 @@ func (p *Provider) deleteRecord(ctx context.Context, zone string, record libdns.
 		strings.TrimSuffix(zone, "."),
 		generateRecordSetName(record.Name, zone),
 		recordType,
-		"",
+		&armdns.RecordSetsClientDeleteOptions{
+			IfMatch: nil,
+		},
 	)
 	if err != nil {
 		return record, err
@@ -137,8 +137,9 @@ func (p *Provider) createOrUpdateRecord(ctx context.Context, zone string, record
 		generateRecordSetName(record.Name, zone),
 		recordType,
 		recordSet,
-		"",
-		ifNoneMatch,
+		&armdns.RecordSetsClientCreateOrUpdateOptions{IfMatch: nil,
+			IfNoneMatch: nil,
+		},
 	)
 	if err != nil {
 		return record, err
@@ -157,69 +158,69 @@ func generateRecordSetName(name string, zone string) string {
 }
 
 // convertStringToRecordType casts standard type name string to an Azure-styled dedicated type.
-func convertStringToRecordType(typeName string) (dns.RecordType, error) {
+func convertStringToRecordType(typeName string) (armdns.RecordType, error) {
 	switch typeName {
 	case "A":
-		return dns.A, nil
+		return armdns.RecordTypeA, nil
 	case "AAAA":
-		return dns.AAAA, nil
+		return armdns.RecordTypeAAAA, nil
 	case "CAA":
-		return dns.CAA, nil
+		return armdns.RecordTypeCAA, nil
 	case "CNAME":
-		return dns.CNAME, nil
+		return armdns.RecordTypeCNAME, nil
 	case "MX":
-		return dns.MX, nil
+		return armdns.RecordTypeMX, nil
 	case "NS":
-		return dns.NS, nil
+		return armdns.RecordTypeNS, nil
 	case "PTR":
-		return dns.PTR, nil
+		return armdns.RecordTypePTR, nil
 	case "SOA":
-		return dns.SOA, nil
+		return armdns.RecordTypeSOA, nil
 	case "SRV":
-		return dns.SRV, nil
+		return armdns.RecordTypeSRV, nil
 	case "TXT":
-		return dns.TXT, nil
+		return armdns.RecordTypeTXT, nil
 	default:
-		return dns.A, fmt.Errorf("The type %v cannot be interpreted.", typeName)
+		return armdns.RecordTypeA, fmt.Errorf("The type %v cannot be interpreted.", typeName)
 	}
 }
 
 // convertAzureRecordSetsToLibdnsRecords converts Azure-styled records to libdns records.
-func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdns.Record, error) {
+func convertAzureRecordSetsToLibdnsRecords(recordSets []*armdns.RecordSet) ([]libdns.Record, error) {
 	var records []libdns.Record
 
 	for _, recordSet := range recordSets {
 		switch typeName := strings.TrimPrefix(*recordSet.Type, "Microsoft.Network/dnszones/"); typeName {
 		case "A":
-			for _, v := range *recordSet.ARecords {
+			for _, v := range recordSet.Properties.ARecords {
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
 					Name:  *recordSet.Name,
-					Value: *v.Ipv4Address,
-					TTL:   time.Duration(*recordSet.TTL) * time.Second,
+					Value: *v.IPv4Address,
+					TTL:   time.Duration(*recordSet.Properties.TTL) * time.Second,
 				}
 				records = append(records, record)
 			}
 		case "AAAA":
-			for _, v := range *recordSet.AaaaRecords {
+			for _, v := range recordSet.Properties.AaaaRecords {
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
 					Name:  *recordSet.Name,
-					Value: *v.Ipv6Address,
-					TTL:   time.Duration(*recordSet.TTL) * time.Second,
+					Value: *v.IPv6Address,
+					TTL:   time.Duration(*recordSet.Properties.TTL) * time.Second,
 				}
 				records = append(records, record)
 			}
 		case "CAA":
-			for _, v := range *recordSet.CaaRecords {
+			for _, v := range recordSet.Properties.CaaRecords {
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
 					Name:  *recordSet.Name,
 					Value: strings.Join([]string{fmt.Sprint(*v.Flags), *v.Tag, *v.Value}, " "),
-					TTL:   time.Duration(*recordSet.TTL) * time.Second,
+					TTL:   time.Duration(*recordSet.Properties.TTL) * time.Second,
 				}
 				records = append(records, record)
 			}
@@ -228,72 +229,80 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 				ID:    *recordSet.Etag,
 				Type:  typeName,
 				Name:  *recordSet.Name,
-				Value: *recordSet.CnameRecord.Cname,
-				TTL:   time.Duration(*recordSet.TTL) * time.Second,
+				Value: *recordSet.Properties.CnameRecord.Cname,
+				TTL:   time.Duration(*recordSet.Properties.TTL) * time.Second,
 			}
 			records = append(records, record)
 		case "MX":
-			for _, v := range *recordSet.MxRecords {
+			for _, v := range recordSet.Properties.MxRecords {
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
 					Name:  *recordSet.Name,
 					Value: strings.Join([]string{fmt.Sprint(*v.Preference), *v.Exchange}, " "),
-					TTL:   time.Duration(*recordSet.TTL) * time.Second,
+					TTL:   time.Duration(*recordSet.Properties.TTL) * time.Second,
 				}
 				records = append(records, record)
 			}
 		case "NS":
-			for _, v := range *recordSet.NsRecords {
+			for _, v := range recordSet.Properties.NsRecords {
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
 					Name:  *recordSet.Name,
 					Value: *v.Nsdname,
-					TTL:   time.Duration(*recordSet.TTL) * time.Second,
+					TTL:   time.Duration(*recordSet.Properties.TTL) * time.Second,
 				}
 				records = append(records, record)
 			}
 		case "PTR":
-			for _, v := range *recordSet.PtrRecords {
+			for _, v := range recordSet.Properties.PtrRecords {
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
 					Name:  *recordSet.Name,
 					Value: *v.Ptrdname,
-					TTL:   time.Duration(*recordSet.TTL) * time.Second,
+					TTL:   time.Duration(*recordSet.Properties.TTL) * time.Second,
 				}
 				records = append(records, record)
 			}
 		case "SOA":
 			record := libdns.Record{
-				ID:    *recordSet.Etag,
-				Type:  typeName,
-				Name:  *recordSet.Name,
-				Value: strings.Join([]string{*recordSet.SoaRecord.Host, *recordSet.SoaRecord.Email, fmt.Sprint(*recordSet.SoaRecord.SerialNumber), fmt.Sprint(*recordSet.SoaRecord.RefreshTime), fmt.Sprint(*recordSet.SoaRecord.RetryTime), fmt.Sprint(*recordSet.SoaRecord.ExpireTime), fmt.Sprint(*recordSet.SoaRecord.MinimumTTL)}, " "),
-				TTL:   time.Duration(*recordSet.TTL) * time.Second,
+				ID:   *recordSet.Etag,
+				Type: typeName,
+				Name: *recordSet.Name,
+				Value: strings.Join([]string{
+					*recordSet.Properties.SoaRecord.Host,
+					*recordSet.Properties.SoaRecord.Email,
+					fmt.Sprint(*recordSet.Properties.SoaRecord.SerialNumber),
+					fmt.Sprint(*recordSet.Properties.SoaRecord.RefreshTime),
+					fmt.Sprint(*recordSet.Properties.SoaRecord.RetryTime),
+					fmt.Sprint(*recordSet.Properties.SoaRecord.ExpireTime),
+					fmt.Sprint(*recordSet.Properties.SoaRecord.MinimumTTL)},
+					" "),
+				TTL: time.Duration(*recordSet.Properties.TTL) * time.Second,
 			}
 			records = append(records, record)
 		case "SRV":
-			for _, v := range *recordSet.SrvRecords {
+			for _, v := range recordSet.Properties.SrvRecords {
 				record := libdns.Record{
 					ID:    *recordSet.Etag,
 					Type:  typeName,
 					Name:  *recordSet.Name,
 					Value: strings.Join([]string{fmt.Sprint(*v.Priority), fmt.Sprint(*v.Weight), fmt.Sprint(*v.Port), *v.Target}, " "),
-					TTL:   time.Duration(*recordSet.TTL) * time.Second,
+					TTL:   time.Duration(*recordSet.Properties.TTL) * time.Second,
 				}
 				records = append(records, record)
 			}
 		case "TXT":
-			for _, v := range *recordSet.TxtRecords {
-				for _, txt := range *v.Value {
+			for _, v := range recordSet.Properties.TxtRecords {
+				for _, txt := range v.Value {
 					record := libdns.Record{
 						ID:    *recordSet.Etag,
 						Type:  typeName,
 						Name:  *recordSet.Name,
-						Value: txt,
-						TTL:   time.Duration(*recordSet.TTL) * time.Second,
+						Value: *txt,
+						TTL:   time.Duration(*recordSet.Properties.TTL) * time.Second,
 					}
 					records = append(records, record)
 				}
@@ -307,54 +316,48 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*dns.RecordSet) ([]libdn
 }
 
 // convertLibdnsRecordToAzureRecordSet converts a libdns record to an Azure-styled record.
-func convertLibdnsRecordToAzureRecordSet(record libdns.Record) (dns.RecordSet, error) {
+func convertLibdnsRecordToAzureRecordSet(record libdns.Record) (armdns.RecordSet, error) {
 	switch record.Type {
 	case "A":
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				ARecords: &[]dns.ARecord{
-					dns.ARecord{
-						Ipv4Address: to.StringPtr(record.Value),
-					},
-				},
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				ARecords: []*armdns.ARecord{{
+					IPv4Address: to.Ptr(record.Value),
+				}},
 			},
 		}
 		return recordSet, nil
 	case "AAAA":
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				AaaaRecords: &[]dns.AaaaRecord{
-					dns.AaaaRecord{
-						Ipv6Address: to.StringPtr(record.Value),
-					},
-				},
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				AaaaRecords: []*armdns.AaaaRecord{{
+					IPv6Address: to.Ptr(record.Value),
+				}},
 			},
 		}
 		return recordSet, nil
 	case "CAA":
 		values := strings.Split(record.Value, " ")
 		flags, _ := strconv.ParseInt(values[0], 10, 32)
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				CaaRecords: &[]dns.CaaRecord{
-					dns.CaaRecord{
-						Flags: to.Int32Ptr(int32(flags)),
-						Tag:   to.StringPtr(values[1]),
-						Value: to.StringPtr(values[2]),
-					},
-				},
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				CaaRecords: []*armdns.CaaRecord{{
+					Flags: to.Ptr[int32](int32(flags)),
+					Tag:   to.Ptr(values[1]),
+					Value: to.Ptr(values[2]),
+				}},
 			},
 		}
 		return recordSet, nil
 	case "CNAME":
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				CnameRecord: &dns.CnameRecord{
-					Cname: to.StringPtr(record.Value),
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				CnameRecord: &armdns.CnameRecord{
+					Cname: to.Ptr(record.Value),
 				},
 			},
 		}
@@ -362,39 +365,33 @@ func convertLibdnsRecordToAzureRecordSet(record libdns.Record) (dns.RecordSet, e
 	case "MX":
 		values := strings.Split(record.Value, " ")
 		preference, _ := strconv.ParseInt(values[0], 10, 32)
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				MxRecords: &[]dns.MxRecord{
-					dns.MxRecord{
-						Preference: to.Int32Ptr(int32(preference)),
-						Exchange:   to.StringPtr(values[1]),
-					},
-				},
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				MxRecords: []*armdns.MxRecord{{
+					Preference: to.Ptr[int32](int32(preference)),
+					Exchange:   to.Ptr(values[1]),
+				}},
 			},
 		}
 		return recordSet, nil
 	case "NS":
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				NsRecords: &[]dns.NsRecord{
-					dns.NsRecord{
-						Nsdname: to.StringPtr(record.Value),
-					},
-				},
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				NsRecords: []*armdns.NsRecord{{
+					Nsdname: to.Ptr(record.Value),
+				}},
 			},
 		}
 		return recordSet, nil
 	case "PTR":
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				PtrRecords: &[]dns.PtrRecord{
-					dns.PtrRecord{
-						Ptrdname: to.StringPtr(record.Value),
-					},
-				},
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				PtrRecords: []*armdns.PtrRecord{{
+					Ptrdname: to.Ptr(record.Value),
+				}},
 			},
 		}
 		return recordSet, nil
@@ -405,17 +402,17 @@ func convertLibdnsRecordToAzureRecordSet(record libdns.Record) (dns.RecordSet, e
 		retryTime, _ := strconv.ParseInt(values[4], 10, 64)
 		expireTime, _ := strconv.ParseInt(values[5], 10, 64)
 		minimumTTL, _ := strconv.ParseInt(values[6], 10, 64)
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				SoaRecord: &dns.SoaRecord{
-					Host:         to.StringPtr(values[0]),
-					Email:        to.StringPtr(values[1]),
-					SerialNumber: to.Int64Ptr(serialNumber),
-					RefreshTime:  to.Int64Ptr(refreshTime),
-					RetryTime:    to.Int64Ptr(retryTime),
-					ExpireTime:   to.Int64Ptr(expireTime),
-					MinimumTTL:   to.Int64Ptr(minimumTTL),
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				SoaRecord: &armdns.SoaRecord{
+					Host:         to.Ptr(values[0]),
+					Email:        to.Ptr(values[1]),
+					SerialNumber: to.Ptr[int64](serialNumber),
+					RefreshTime:  to.Ptr[int64](refreshTime),
+					RetryTime:    to.Ptr[int64](retryTime),
+					ExpireTime:   to.Ptr[int64](expireTime),
+					MinimumTTL:   to.Ptr[int64](minimumTTL),
 				},
 			},
 		}
@@ -425,33 +422,29 @@ func convertLibdnsRecordToAzureRecordSet(record libdns.Record) (dns.RecordSet, e
 		priority, _ := strconv.ParseInt(values[0], 10, 32)
 		weight, _ := strconv.ParseInt(values[1], 10, 32)
 		port, _ := strconv.ParseInt(values[2], 10, 32)
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				SrvRecords: &[]dns.SrvRecord{
-					dns.SrvRecord{
-						Priority: to.Int32Ptr(int32(priority)),
-						Weight:   to.Int32Ptr(int32(weight)),
-						Port:     to.Int32Ptr(int32(port)),
-						Target:   to.StringPtr(values[3]),
-					},
-				},
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				SrvRecords: []*armdns.SrvRecord{{
+					Priority: to.Ptr[int32](int32(priority)),
+					Weight:   to.Ptr[int32](int32(weight)),
+					Port:     to.Ptr[int32](int32(port)),
+					Target:   to.Ptr(values[3]),
+				}},
 			},
 		}
 		return recordSet, nil
 	case "TXT":
-		recordSet := dns.RecordSet{
-			RecordSetProperties: &dns.RecordSetProperties{
-				TTL: to.Int64Ptr(int64(record.TTL / time.Second)),
-				TxtRecords: &[]dns.TxtRecord{
-					dns.TxtRecord{
-						Value: &[]string{record.Value},
-					},
-				},
+		recordSet := armdns.RecordSet{
+			Properties: &armdns.RecordSetProperties{
+				TTL: to.Ptr[int64](int64(record.TTL / time.Second)),
+				TxtRecords: []*armdns.TxtRecord{{
+					Value: []*string{&record.Value},
+				}},
 			},
 		}
 		return recordSet, nil
 	default:
-		return dns.RecordSet{}, fmt.Errorf("The type %v cannot be interpreted.", record.Type)
+		return armdns.RecordSet{}, fmt.Errorf("The type %v cannot be interpreted.", record.Type)
 	}
 }
