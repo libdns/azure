@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/dns/armdns"
@@ -24,11 +25,31 @@ type Client struct {
 // setupClient invokes authentication and store client to the provider instance.
 func (p *Provider) setupClient() error {
 	if p.client.azureClient == nil {
-		clientCredential, err := azidentity.NewClientSecretCredential(p.TenantId, p.ClientId, p.ClientSecret, nil)
+		credentials := []azcore.TokenCredential{}
+
+		// If Tenant ID, Client ID, or Client Secret is specified, attempt to authenticate using a client secret.
+		// If not, attempt to authenticate using managed identity.
+		// Authentication using a client secret is prioritized over using managed identiry to keep backward compatibility.
+		if p.TenantId != "" || p.ClientId != "" || p.ClientSecret != "" {
+			clientCredential, err := azidentity.NewClientSecretCredential(p.TenantId, p.ClientId, p.ClientSecret, nil)
+			if err != nil {
+				return err
+			}
+			credentials = append(credentials, clientCredential)
+
+		} else {
+			managedIdentityCredential, err := azidentity.NewManagedIdentityCredential(nil)
+			if err != nil {
+				return err
+			}
+			credentials = append(credentials, managedIdentityCredential)
+		}
+
+		chainedTokenCredential, err := azidentity.NewChainedTokenCredential(credentials, nil)
 		if err != nil {
 			return err
 		}
-		clientFactory, err := armdns.NewClientFactory(p.SubscriptionId, clientCredential, nil)
+		clientFactory, err := armdns.NewClientFactory(p.SubscriptionId, chainedTokenCredential, nil)
 		if err != nil {
 			return err
 		}
