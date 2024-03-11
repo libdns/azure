@@ -158,8 +158,9 @@ func (p *Provider) createOrUpdateRecord(ctx context.Context, zone string, record
 		generateRecordSetName(record.Name, zone),
 		recordType,
 		recordSet,
-		&armdns.RecordSetsClientCreateOrUpdateOptions{IfMatch: nil,
-			IfNoneMatch: nil,
+		&armdns.RecordSetsClientCreateOrUpdateOptions{
+			IfMatch:     nil,
+			IfNoneMatch: &ifNoneMatch,
 		},
 	)
 	if err != nil {
