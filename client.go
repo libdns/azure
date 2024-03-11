@@ -83,9 +83,7 @@ func (p *Provider) getRecords(ctx context.Context, zone string) ([]libdns.Record
 		if err != nil {
 			return nil, err
 		}
-		for _, v := range page.Value {
-			recordSets = append(recordSets, v)
-		}
+		recordSets = append(recordSets, page.Value...)
 	}
 
 	records, _ := convertAzureRecordSetsToLibdnsRecords(recordSets)
@@ -203,7 +201,7 @@ func convertStringToRecordType(typeName string) (armdns.RecordType, error) {
 	case "TXT":
 		return armdns.RecordTypeTXT, nil
 	default:
-		return armdns.RecordTypeA, fmt.Errorf("The type %v cannot be interpreted.", typeName)
+		return armdns.RecordTypeA, fmt.Errorf("the type %v cannot be interpreted", typeName)
 	}
 }
 
@@ -330,7 +328,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*armdns.RecordSet) ([]li
 				}
 			}
 		default:
-			return []libdns.Record{}, fmt.Errorf("The type %v cannot be interpreted.", typeName)
+			return []libdns.Record{}, fmt.Errorf("the type %v cannot be interpreted", typeName)
 		}
 	}
 
@@ -467,6 +465,6 @@ func convertLibdnsRecordToAzureRecordSet(record libdns.Record) (armdns.RecordSet
 		}
 		return recordSet, nil
 	default:
-		return armdns.RecordSet{}, fmt.Errorf("The type %v cannot be interpreted.", record.Type)
+		return armdns.RecordSet{}, fmt.Errorf("the type %v cannot be interpreted", record.Type)
 	}
 }

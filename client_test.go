@@ -72,7 +72,7 @@ func Test_convertStringToRecordType(t *testing.T) {
 	t.Run("type=ERR", func(t *testing.T) {
 		_, err := convertStringToRecordType("ERR")
 		got := err.Error()
-		want := "The type ERR cannot be interpreted."
+		want := "the type ERR cannot be interpreted"
 		if diff := cmp.Diff(got, want); diff != "" {
 			t.Errorf("diff: %s", diff)
 		}
@@ -311,7 +311,7 @@ func Test_convertAzureRecordSetsToLibdnsRecords(t *testing.T) {
 		}}
 		_, err := convertAzureRecordSetsToLibdnsRecords(azureRecordSets)
 		got := err.Error()
-		want := "The type ERR cannot be interpreted."
+		want := "the type ERR cannot be interpreted"
 		if diff := cmp.Diff(got, want); diff != "" {
 			t.Errorf("diff: %s", diff)
 		}
@@ -501,7 +501,7 @@ func Test_convertLibdnsRecordToAzureRecordSet(t *testing.T) {
 		}}
 		_, err := convertLibdnsRecordToAzureRecordSet(libdnsRecords[0])
 		got := err.Error()
-		want := "The type ERR cannot be interpreted."
+		want := "the type ERR cannot be interpreted"
 		if diff := cmp.Diff(got, want); diff != "" {
 			t.Errorf("diff: %s", diff)
 		}
