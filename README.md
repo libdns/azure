@@ -4,22 +4,42 @@ This package implements the libdns interfaces for the [Azure DNS API](https://do
 
 ## Authenticating
 
-This package supports authentication using the **Client Credentials** (Azure AD Application ID and Secret) through [azure-sdk-for-go](https://github.com/Azure/azure-sdk-for-go).
+This package supports authentication using **a service principal with a secret** and **a managed identity** through [azure-sdk-for-go](https://github.com/Azure/azure-sdk-for-go).
+
+### Service Principal with a Secret
+
+To attempt to authenticate using a service principal with a secret, pass `TenantId`, `ClientId`, and `ClientSecret` to the `Provider`. If any of these three values are not empty, this package will attempt to authenticate using a service principal with a secret.
 
 You will need to create a service principal using [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/create-an-azure-service-principal-azure-cli) or [Azure Portal](https://docs.microsoft.com/en-us/azure/active-directory/develop/howto-create-service-principal-portal), and assign the **DNS Zone Contributor** role to the service principal for the DNS zones that you want to manage.
 
 Then keep the following information to pass to the `Provider` struct fields for authentication:
 
-* `TenantId` (`json:"tenant_id"`)
-	* [Azure Active Directory] > [Properties] > [Tenant ID]
-* `ClientId` (`json:"client_id"`)
-	* [Azure Active Directory] > [App registrations] > Your Application > [Application ID]
-* `ClientSecret` (`json:"client_secret"`)
-	* [Azure Active Directory] > [App registrations] > Your Application > [Certificates & secrets] > [Client secrets] > [Value]
-* `SubscriptionId` (`json:"subscription_id"`)
-	* [DNS zones] > Your Zone > [Subscription ID]
-* `ResourceGroupName` (`json:"resource_group_name"`)
-	* [DNS zones] > Your Zone > [Resource group]
+- `TenantId` (`json:"tenant_id"`)
+  -[Azure Active Directory] > [Properties] > [Tenant ID]
+- `ClientId` (`json:"client_id"`)
+  -[Azure Active Directory] > [App registrations] > Your Application > [Application ID]
+- `ClientSecret` (`json:"client_secret"`)
+  -[Azure Active Directory] > [App registrations] > Your Application > [Certificates & secrets] > [Client secrets] > [Value]
+- `SubscriptionId` (`json:"subscription_id"`)
+  -[DNS zones] > Your Zone > [Subscription ID]
+- `ResourceGroupName` (`json:"resource_group_name"`)
+  -[DNS zones] > Your Zone > [Resource group]
+
+### Managed Identity
+
+To attempt to authenticate using a managed identity, do not pass `TenantId`, `ClientId`, and `ClientSecret` to the `Provider`. If all three values are empty, this package will attempt to authenticate using a managed identity.
+
+You will need to assign the **DNS Zone Contributor** role to the managed identity for the DNS zones that you want to manage.
+
+Then keep the following information to pass to the `Provider` struct fields for authentication:
+
+- `SubscriptionId` (`json:"subscription_id"`)
+  -[DNS zones] > Your Zone > [Subscription ID]
+- `ResourceGroupName` (`json:"resource_group_name"`)
+  -[DNS zones] > Your Zone > [Resource group]
+
+> [!NOTE]
+> If this package is running outside of an Azure VM like Azure Arc, ensure required environment variables to use a managed identity (`IDENTITY_ENDPOINT`, `IMDS_ENDPOINT`, etc.) are available on your resources. [azure-sdk-for-go](https://github.com/Azure/azure-sdk-for-go) uses some environment variables to determine the endpoint for IMDS or HIMDS, and this package is also in the same manner. Refer to the Azure documentation for each services to use a managed identity.
 
 ## Example
 
@@ -43,7 +63,8 @@ import (
 // In this example, the information required for authentication is passed as environment variables.
 func main() {
 
-	// Create new provider instance
+	// Create new provider instance by authenticating using a service principal with a secret.
+	// To authenticate using a managed identity, remove TenantId, ClientId, and ClientSecret.
 	provider := azure.Provider{
 		TenantId:          os.Getenv("AZURE_TENANT_ID"),
 		ClientId:          os.Getenv("AZURE_CLIENT_ID"),

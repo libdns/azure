@@ -15,7 +15,8 @@ import (
 // In this example, the information required for authentication is passed as environment variables.
 func main() {
 
-	// Create new provider instance
+	// Create new provider instance by authenticating using a service principal with a secret.
+	// To authenticate using a managed identity, remove TenantId, ClientId, and ClientSecret.
 	provider := azure.Provider{
 		TenantId:          os.Getenv("AZURE_TENANT_ID"),
 		ClientId:          os.Getenv("AZURE_CLIENT_ID"),
