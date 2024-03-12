@@ -107,6 +107,10 @@ func (p *Provider) deleteRecord(ctx context.Context, zone string, record libdns.
 	p.client.mutex.Lock()
 	defer p.client.mutex.Unlock()
 
+	if err := p.setupClient(); err != nil {
+		return record, err
+	}
+
 	recordType, err := convertStringToRecordType(record.Type)
 	if err != nil {
 		return record, err
