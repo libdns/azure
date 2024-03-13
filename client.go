@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/dns/armdns"
@@ -24,11 +25,30 @@ type Client struct {
 // setupClient invokes authentication and store client to the provider instance.
 func (p *Provider) setupClient() error {
 	if p.client.azureClient == nil {
-		clientCredential, err := azidentity.NewClientSecretCredential(p.TenantId, p.ClientId, p.ClientSecret, nil)
+		credentials := []azcore.TokenCredential{}
+
+		// If Tenant ID, Client ID, or Client Secret is specified, attempt to authenticate using a client secret.
+		// If not, attempt to authenticate using managed identity.
+		// Authentication using a client secret is prioritized over using managed identiry to keep backward compatibility.
+		if p.TenantId != "" || p.ClientId != "" || p.ClientSecret != "" {
+			clientCredential, err := azidentity.NewClientSecretCredential(p.TenantId, p.ClientId, p.ClientSecret, nil)
+			if err != nil {
+				return err
+			}
+			credentials = append(credentials, clientCredential)
+		} else {
+			managedIdentityCredential, err := azidentity.NewManagedIdentityCredential(nil)
+			if err != nil {
+				return err
+			}
+			credentials = append(credentials, managedIdentityCredential)
+		}
+
+		chainedTokenCredential, err := azidentity.NewChainedTokenCredential(credentials, nil)
 		if err != nil {
 			return err
 		}
-		clientFactory, err := armdns.NewClientFactory(p.SubscriptionId, clientCredential, nil)
+		clientFactory, err := armdns.NewClientFactory(p.SubscriptionId, chainedTokenCredential, nil)
 		if err != nil {
 			return err
 		}
@@ -62,9 +82,7 @@ func (p *Provider) getRecords(ctx context.Context, zone string) ([]libdns.Record
 		if err != nil {
 			return nil, err
 		}
-		for _, v := range page.Value {
-			recordSets = append(recordSets, v)
-		}
+		recordSets = append(recordSets, page.Value...)
 	}
 
 	records, _ := convertAzureRecordSetsToLibdnsRecords(recordSets)
@@ -87,6 +105,10 @@ func (p *Provider) updateRecord(ctx context.Context, zone string, record libdns.
 func (p *Provider) deleteRecord(ctx context.Context, zone string, record libdns.Record) (libdns.Record, error) {
 	p.client.mutex.Lock()
 	defer p.client.mutex.Unlock()
+
+	if err := p.setupClient(); err != nil {
+		return record, err
+	}
 
 	recordType, err := convertStringToRecordType(record.Type)
 	if err != nil {
@@ -137,8 +159,9 @@ func (p *Provider) createOrUpdateRecord(ctx context.Context, zone string, record
 		generateRecordSetName(record.Name, zone),
 		recordType,
 		recordSet,
-		&armdns.RecordSetsClientCreateOrUpdateOptions{IfMatch: nil,
-			IfNoneMatch: nil,
+		&armdns.RecordSetsClientCreateOrUpdateOptions{
+			IfMatch:     nil,
+			IfNoneMatch: &ifNoneMatch,
 		},
 	)
 	if err != nil {
@@ -181,7 +204,7 @@ func convertStringToRecordType(typeName string) (armdns.RecordType, error) {
 	case "TXT":
 		return armdns.RecordTypeTXT, nil
 	default:
-		return armdns.RecordTypeA, fmt.Errorf("The type %v cannot be interpreted.", typeName)
+		return armdns.RecordTypeA, fmt.Errorf("the type %v cannot be interpreted", typeName)
 	}
 }
 
@@ -308,7 +331,7 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*armdns.RecordSet) ([]li
 				}
 			}
 		default:
-			return []libdns.Record{}, fmt.Errorf("The type %v cannot be interpreted.", typeName)
+			return []libdns.Record{}, fmt.Errorf("the type %v cannot be interpreted", typeName)
 		}
 	}
 
@@ -445,6 +468,6 @@ func convertLibdnsRecordToAzureRecordSet(record libdns.Record) (armdns.RecordSet
 		}
 		return recordSet, nil
 	default:
-		return armdns.RecordSet{}, fmt.Errorf("The type %v cannot be interpreted.", record.Type)
+		return armdns.RecordSet{}, fmt.Errorf("the type %v cannot be interpreted", record.Type)
 	}
 }

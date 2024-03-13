@@ -15,13 +15,14 @@ import (
 // In this example, the information required for authentication is passed as environment variables.
 func main() {
 
-	// Create new provider instance
+	// Create new provider instance by authenticating using a service principal with a secret.
+	// To authenticate using a managed identity, remove TenantId, ClientId, and ClientSecret.
 	provider := azure.Provider{
+		SubscriptionId:    os.Getenv("AZURE_SUBSCRIPTION_ID"),
+		ResourceGroupName: os.Getenv("AZURE_RESOURCE_GROUP_NAME"),
 		TenantId:          os.Getenv("AZURE_TENANT_ID"),
 		ClientId:          os.Getenv("AZURE_CLIENT_ID"),
 		ClientSecret:      os.Getenv("AZURE_CLIENT_SECRET"),
-		SubscriptionId:    os.Getenv("AZURE_SUBSCRIPTION_ID"),
-		ResourceGroupName: os.Getenv("AZURE_RESOURCE_GROUP_NAME"),
 	}
 	zone := os.Getenv("AZURE_DNS_ZONE_FQDN")
 
@@ -38,66 +39,67 @@ func main() {
 
 	// Define test records
 	testRecords := []libdns.Record{
-		libdns.Record{
+		{
 			Type:  "A",
 			Name:  "record-a",
 			Value: "127.0.0.1",
 			TTL:   time.Duration(30) * time.Second,
 		},
-		libdns.Record{
+		{
 			Type:  "AAAA",
 			Name:  "record-aaaa",
 			Value: "::1",
 			TTL:   time.Duration(31) * time.Second,
 		},
-		libdns.Record{
+		{
 			Type:  "CAA",
 			Name:  "record-caa",
 			Value: "0 issue 'ca." + zone + "'",
 			TTL:   time.Duration(32) * time.Second,
 		},
-		libdns.Record{
+		{
 			Type:  "CNAME",
 			Name:  "record-cname",
 			Value: "www." + zone,
 			TTL:   time.Duration(33) * time.Second,
 		},
-		libdns.Record{
+		{
 			Type:  "MX",
 			Name:  "record-mx",
 			Value: "10 mail." + zone,
 			TTL:   time.Duration(34) * time.Second,
 		},
-		// libdns.Record{
+		// {
 		// 	Type:  "NS",
 		// 	Name:  "@",
 		// 	Value: "ns1.example.com.",
 		// 	TTL:   time.Duration(35) * time.Second,
 		// },
-		libdns.Record{
+		{
 			Type:  "PTR",
 			Name:  "record-ptr",
 			Value: "hoge." + zone,
 			TTL:   time.Duration(36) * time.Second,
 		},
-		// libdns.Record{
+		// {
 		// 	Type:  "SOA",
 		// 	Name:  "@",
 		// 	Value: "ns1.example.com. hostmaster." + zone + " 1 7200 900 1209600 86400",
 		// 	TTL:   time.Duration(37) * time.Second,
 		// },
-		libdns.Record{
+		{
 			Type:  "SRV",
 			Name:  "record-srv",
 			Value: "1 10 5269 app." + zone,
 			TTL:   time.Duration(38) * time.Second,
 		},
-		libdns.Record{
+		{
 			Type:  "TXT",
 			Name:  "record-txt",
 			Value: "TEST VALUE",
 			TTL:   time.Duration(39) * time.Second,
-		}}
+		},
+	}
 
 	// Create new records
 	fmt.Printf("(2) Create new records\n")
