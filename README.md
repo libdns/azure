@@ -27,7 +27,7 @@ Then keep the following information to pass to the `Provider` struct fields for 
 
 ### Managed Identity
 
-To attempt to authenticate using a managed identity, do not pass `TenantId`, `ClientId`, and `ClientSecret` to the `Provider`. If all three values are empty, this package will attempt to authenticate using a managed identity.
+To attempt to authenticate using a managed identity, leave all of `TenantId`, `ClientId`, and `ClientSecret` unset or empty to the `Provider`. If all three values are unset or empty, this package will attempt to authenticate using a managed identity.
 
 You will need to assign the **DNS Zone Contributor** role to the managed identity for the DNS zones that you want to manage.
 
