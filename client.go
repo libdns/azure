@@ -36,7 +36,6 @@ func (p *Provider) setupClient() error {
 				return err
 			}
 			credentials = append(credentials, clientCredential)
-
 		} else {
 			managedIdentityCredential, err := azidentity.NewManagedIdentityCredential(nil)
 			if err != nil {
