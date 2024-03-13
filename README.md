@@ -66,11 +66,11 @@ func main() {
 	// Create new provider instance by authenticating using a service principal with a secret.
 	// To authenticate using a managed identity, remove TenantId, ClientId, and ClientSecret.
 	provider := azure.Provider{
+		SubscriptionId:    os.Getenv("AZURE_SUBSCRIPTION_ID"),
+		ResourceGroupName: os.Getenv("AZURE_RESOURCE_GROUP_NAME"),
 		TenantId:          os.Getenv("AZURE_TENANT_ID"),
 		ClientId:          os.Getenv("AZURE_CLIENT_ID"),
 		ClientSecret:      os.Getenv("AZURE_CLIENT_SECRET"),
-		SubscriptionId:    os.Getenv("AZURE_SUBSCRIPTION_ID"),
-		ResourceGroupName: os.Getenv("AZURE_RESOURCE_GROUP_NAME"),
 	}
 	zone := os.Getenv("AZURE_DNS_ZONE_FQDN")
 
