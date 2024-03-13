@@ -15,15 +15,15 @@ You will need to create a service principal using [Azure CLI](https://docs.micro
 Then keep the following information to pass to the `Provider` struct fields for authentication:
 
 - `SubscriptionId` (`json:"subscription_id"`)
-  -[DNS zones] > Your Zone > [Subscription ID]
+  - [DNS zones] > Your Zone > [Subscription ID]
 - `ResourceGroupName` (`json:"resource_group_name"`)
-  -[DNS zones] > Your Zone > [Resource group]
+  - [DNS zones] > Your Zone > [Resource group]
 - `TenantId` (`json:"tenant_id"`)
-  -[Microsoft Entra ID] > [Properties] > [Tenant ID]
+  - [Microsoft Entra ID] > [Properties] > [Tenant ID]
 - `ClientId` (`json:"client_id"`)
-  -[Microsoft Entra ID] > [App registrations] > Your Application > [Application (client) ID]
+  - [Microsoft Entra ID] > [App registrations] > Your Application > [Application (client) ID]
 - `ClientSecret` (`json:"client_secret"`)
-  -[Microsoft Entra ID] > [App registrations] > Your Application > [Certificates & secrets] > [Client secrets] > [Value]
+  - [Microsoft Entra ID] > [App registrations] > Your Application > [Certificates & secrets] > [Client secrets] > [Value]
 
 ### Managed Identity
 
@@ -34,9 +34,9 @@ You will need to assign the **DNS Zone Contributor** role to the managed identit
 Then keep the following information to pass to the `Provider` struct fields for authentication:
 
 - `SubscriptionId` (`json:"subscription_id"`)
-  -[DNS zones] > Your Zone > [Subscription ID]
+  - [DNS zones] > Your Zone > [Subscription ID]
 - `ResourceGroupName` (`json:"resource_group_name"`)
-  -[DNS zones] > Your Zone > [Resource group]
+  - [DNS zones] > Your Zone > [Resource group]
 
 > [!NOTE]
 > If this package is running outside of an Azure VM like Azure Arc, ensure required environment variables to use a managed identity (`IDENTITY_ENDPOINT`, `IMDS_ENDPOINT`, etc.) are available on your resources. [azure-sdk-for-go](https://github.com/Azure/azure-sdk-for-go) uses some environment variables to determine the endpoint for IMDS or HIMDS, and this package is also in the same manner. Refer to the Azure documentation for each services to use a managed identity.
