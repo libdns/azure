@@ -40,11 +40,11 @@ func Test_Authentication(t *testing.T) {
 	})
 
 	clientSecretProvider := Provider{
+		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
+		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 		TenantId:          os.Getenv("LIBDNS_AZURE_TENANT_ID"),
 		ClientId:          os.Getenv("LIBDNS_AZURE_CLIENT_ID"),
 		ClientSecret:      os.Getenv("LIBDNS_AZURE_CLIENT_SECRET"),
-		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
-		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 	}
 	managedIdentityProvider := Provider{
 		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
@@ -78,11 +78,11 @@ func Test_GetRecords(t *testing.T) {
 	}
 
 	provider := Provider{
+		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
+		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 		TenantId:          os.Getenv("LIBDNS_AZURE_TENANT_ID"),
 		ClientId:          os.Getenv("LIBDNS_AZURE_CLIENT_ID"),
 		ClientSecret:      os.Getenv("LIBDNS_AZURE_CLIENT_SECRET"),
-		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
-		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 	}
 
 	t.Run("get-prepare", func(t *testing.T) {
@@ -122,11 +122,11 @@ func Test_AppendRecords(t *testing.T) {
 	}
 
 	provider := Provider{
+		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
+		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 		TenantId:          os.Getenv("LIBDNS_AZURE_TENANT_ID"),
 		ClientId:          os.Getenv("LIBDNS_AZURE_CLIENT_ID"),
 		ClientSecret:      os.Getenv("LIBDNS_AZURE_CLIENT_SECRET"),
-		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
-		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 	}
 
 	t.Run("append-prepare", func(t *testing.T) {
@@ -162,11 +162,11 @@ func Test_SetRecords(t *testing.T) {
 	}
 
 	provider := Provider{
+		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
+		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 		TenantId:          os.Getenv("LIBDNS_AZURE_TENANT_ID"),
 		ClientId:          os.Getenv("LIBDNS_AZURE_CLIENT_ID"),
 		ClientSecret:      os.Getenv("LIBDNS_AZURE_CLIENT_SECRET"),
-		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
-		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 	}
 
 	t.Run("set-success", func(t *testing.T) {
@@ -190,11 +190,11 @@ func Test_DeleteRecords(t *testing.T) {
 	}
 
 	provider := Provider{
+		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
+		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 		TenantId:          os.Getenv("LIBDNS_AZURE_TENANT_ID"),
 		ClientId:          os.Getenv("LIBDNS_AZURE_CLIENT_ID"),
 		ClientSecret:      os.Getenv("LIBDNS_AZURE_CLIENT_SECRET"),
-		SubscriptionId:    os.Getenv("LIBDNS_AZURE_SUBSCRIPTION_ID"),
-		ResourceGroupName: os.Getenv("LIBDNS_AZURE_RESOURCE_GROUP_NAME"),
 	}
 
 	t.Run("delete-prepare", func(t *testing.T) {

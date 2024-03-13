@@ -14,16 +14,16 @@ You will need to create a service principal using [Azure CLI](https://docs.micro
 
 Then keep the following information to pass to the `Provider` struct fields for authentication:
 
-- `TenantId` (`json:"tenant_id"`)
-  -[Azure Active Directory] > [Properties] > [Tenant ID]
-- `ClientId` (`json:"client_id"`)
-  -[Azure Active Directory] > [App registrations] > Your Application > [Application ID]
-- `ClientSecret` (`json:"client_secret"`)
-  -[Azure Active Directory] > [App registrations] > Your Application > [Certificates & secrets] > [Client secrets] > [Value]
 - `SubscriptionId` (`json:"subscription_id"`)
   -[DNS zones] > Your Zone > [Subscription ID]
 - `ResourceGroupName` (`json:"resource_group_name"`)
   -[DNS zones] > Your Zone > [Resource group]
+- `TenantId` (`json:"tenant_id"`)
+  -[Microsoft Entra ID] > [Properties] > [Tenant ID]
+- `ClientId` (`json:"client_id"`)
+  -[Microsoft Entra ID] > [App registrations] > Your Application > [Application (client) ID]
+- `ClientSecret` (`json:"client_secret"`)
+  -[Microsoft Entra ID] > [App registrations] > Your Application > [Certificates & secrets] > [Client secrets] > [Value]
 
 ### Managed Identity
 

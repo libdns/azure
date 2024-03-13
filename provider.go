@@ -8,12 +8,32 @@ import (
 
 // Provider implements the libdns interfaces for Azure DNS
 type Provider struct {
-	TenantId          string `json:"tenant_id,omitempty"`
-	ClientId          string `json:"client_id,omitempty"`
-	ClientSecret      string `json:"client_secret,omitempty"`
-	SubscriptionId    string `json:"subscription_id,omitempty"`
+
+	// Subscription ID is the ID of the subscription in which the DNS zone is located. Required.
+	SubscriptionId string `json:"subscription_id,omitempty"`
+
+	// Resource Group Name is the name of the resource group in which the DNS zone is located. Required.
 	ResourceGroupName string `json:"resource_group_name,omitempty"`
-	client            Client
+
+	// (Optional)
+	// Tenant ID is the ID of the tenant of the Microsoft Entra ID in which the application is located.
+	// Required only when authenticating using a service principal with a secret.
+	// Do not set any value to authenticate using a managed identity.
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// (Optional)
+	// Client ID is the ID of the application.
+	// Required only when authenticating using a service principal with a secret.
+	// Do not set any value to authenticate using a managed identity.
+	ClientId string `json:"client_id,omitempty"`
+
+	// (Optional)
+	// Client Secret is the client secret of the application.
+	// Required only when authenticating using a service principal with a secret.
+	// Do not set any value to authenticate using a managed identity.
+	ClientSecret string `json:"client_secret,omitempty"`
+
+	client Client
 }
 
 // GetRecords lists all the records in the zone.
