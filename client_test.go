@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -100,6 +101,33 @@ var azureFakeRecords = []armdns.RecordSet{
 		},
 	},
 	{
+		Name: to.Ptr("_service._proto.record-srv"),
+		Type: to.Ptr("Microsoft.Network/dnszones/SRV"),
+		Etag: to.Ptr("ETAG_SRV"),
+		Properties: &armdns.RecordSetProperties{
+			TTL:  to.Ptr[int64](30),
+			Fqdn: to.Ptr("_service._proto.record-srv.example.com."),
+			SrvRecords: []*armdns.SrvRecord{{
+				Priority: to.Ptr[int32](1),
+				Weight:   to.Ptr[int32](10),
+				Port:     to.Ptr[int32](5269),
+				Target:   to.Ptr("app.example.com"),
+			}},
+		},
+	},
+	{
+		Name: to.Ptr("record-txt"),
+		Type: to.Ptr("Microsoft.Network/dnszones/TXT"),
+		Etag: to.Ptr("ETAG_TXT"),
+		Properties: &armdns.RecordSetProperties{
+			TTL:  to.Ptr[int64](30),
+			Fqdn: to.Ptr("record-txt.example.com."),
+			TxtRecords: []*armdns.TxtRecord{{
+				Value: []*string{to.Ptr("TEST VALUE")},
+			}},
+		},
+	},
+	{
 		Name: to.Ptr("record-ptr"),
 		Type: to.Ptr("Microsoft.Network/dnszones/PTR"),
 		Etag: to.Ptr("ETAG_PTR"),
@@ -128,105 +156,68 @@ var azureFakeRecords = []armdns.RecordSet{
 			},
 		},
 	},
-	{
-		Name: to.Ptr("record-srv"),
-		Type: to.Ptr("Microsoft.Network/dnszones/SRV"),
-		Etag: to.Ptr("ETAG_SRV"),
-		Properties: &armdns.RecordSetProperties{
-			TTL:  to.Ptr[int64](30),
-			Fqdn: to.Ptr("record-srv.example.com."),
-			SrvRecords: []*armdns.SrvRecord{{
-				Priority: to.Ptr[int32](1),
-				Weight:   to.Ptr[int32](10),
-				Port:     to.Ptr[int32](5269),
-				Target:   to.Ptr("app.example.com"),
-			}},
-		},
-	},
-	{
-		Name: to.Ptr("record-txt"),
-		Type: to.Ptr("Microsoft.Network/dnszones/TXT"),
-		Etag: to.Ptr("ETAG_TXT"),
-		Properties: &armdns.RecordSetProperties{
-			TTL:  to.Ptr[int64](30),
-			Fqdn: to.Ptr("record-txt.example.com."),
-			TxtRecords: []*armdns.TxtRecord{{
-				Value: []*string{to.Ptr("TEST VALUE")},
-			}},
-		},
-	},
 }
 
 var libdnsFakeRecords = []libdns.Record{
-	{
-		ID:    "ETAG_A",
-		Type:  "A",
-		Name:  "record-a",
-		Value: "127.0.0.1",
-		TTL:   time.Duration(30) * time.Second,
+	libdns.Address{
+		Name: "record-a",
+		TTL:  time.Duration(30) * time.Second,
+		IP:   netip.MustParseAddr("127.0.0.1"),
 	},
-	{
-		ID:    "ETAG_AAAA",
-		Type:  "AAAA",
-		Name:  "record-aaaa",
-		Value: "::1",
-		TTL:   time.Duration(30) * time.Second,
+	libdns.Address{
+		Name: "record-aaaa",
+		TTL:  time.Duration(30) * time.Second,
+		IP:   netip.MustParseAddr("::1"),
 	},
-	{
-		ID:    "ETAG_CAA",
-		Type:  "CAA",
+	libdns.CAA{
 		Name:  "record-caa",
-		Value: "0 issue ca.example.com",
 		TTL:   time.Duration(30) * time.Second,
+		Flags: 0,
+		Tag:   "issue",
+		Value: "ca.example.com",
 	},
-	{
-		ID:    "ETAG_CNAME",
-		Type:  "CNAME",
-		Name:  "record-cname",
-		Value: "www.example.com",
-		TTL:   time.Duration(30) * time.Second,
+	libdns.CNAME{
+		Name:   "record-cname",
+		TTL:    time.Duration(30) * time.Second,
+		Target: "www.example.com",
 	},
-	{
-		ID:    "ETAG_MX",
-		Type:  "MX",
-		Name:  "record-mx",
-		Value: "10 mail.example.com",
-		TTL:   time.Duration(30) * time.Second,
+	libdns.MX{
+		Name:       "record-mx",
+		TTL:        time.Duration(30) * time.Second,
+		Preference: 10,
+		Target:     "mail.example.com",
 	},
-	{
-		ID:    "ETAG_NS",
-		Type:  "NS",
-		Name:  "@",
-		Value: "ns1.example.com",
-		TTL:   time.Duration(30) * time.Second,
+	libdns.NS{
+		Name:   "@",
+		TTL:    time.Duration(30) * time.Second,
+		Target: "ns1.example.com",
 	},
-	{
-		ID:    "ETAG_PTR",
-		Type:  "PTR",
-		Name:  "record-ptr",
-		Value: "hoge.example.com",
-		TTL:   time.Duration(30) * time.Second,
+	libdns.SRV{
+		Service:   "service",
+		Transport: "proto",
+		Name:      "record-srv",
+		TTL:       time.Duration(30) * time.Second,
+		Priority:  1,
+		Weight:    10,
+		Port:      5269,
+		Target:    "app.example.com",
 	},
-	{
-		ID:    "ETAG_SOA",
-		Type:  "SOA",
-		Name:  "@",
-		Value: "ns1.example.com hostmaster.example.com 1 7200 900 1209600 86400",
-		TTL:   time.Duration(30) * time.Second,
+	libdns.TXT{
+		Name: "record-txt",
+		TTL:  time.Duration(30) * time.Second,
+		Text: "TEST VALUE",
 	},
-	{
-		ID:    "ETAG_SRV",
-		Type:  "SRV",
-		Name:  "record-srv",
-		Value: "1 10 5269 app.example.com",
-		TTL:   time.Duration(30) * time.Second,
+	libdns.RR{
+		Type: "PTR",
+		Name: "record-ptr",
+		TTL:  time.Duration(30) * time.Second,
+		Data: "hoge.example.com",
 	},
-	{
-		ID:    "ETAG_TXT",
-		Type:  "TXT",
-		Name:  "record-txt",
-		Value: "TEST VALUE",
-		TTL:   time.Duration(30) * time.Second,
+	libdns.RR{
+		Type: "SOA",
+		Name: "@",
+		TTL:  time.Duration(30) * time.Second,
+		Data: "ns1.example.com hostmaster.example.com 1 7200 900 1209600 86400",
 	},
 }
 
@@ -378,7 +369,7 @@ func Test_generateRecordSetName(t *testing.T) {
 }
 
 func Test_convertStringToRecordType(t *testing.T) {
-	typeNames := []string{"A", "AAAA", "CAA", "CNAME", "MX", "NS", "PTR", "SOA", "SRV", "TXT"}
+	typeNames := []string{"A", "AAAA", "CAA", "CNAME", "MX", "NS", "SRV", "TXT", "PTR", "SOA"}
 	for _, typeName := range typeNames {
 		t.Run("type="+typeName, func(t *testing.T) {
 			recordType, _ := convertStringToRecordType(typeName)
@@ -408,7 +399,7 @@ func Test_convertAzureRecordSetsToLibdnsRecords(t *testing.T) {
 		}
 		got, _ := convertAzureRecordSetsToLibdnsRecords(azureRecordSets)
 		want := libdnsFakeRecords
-		if diff := cmp.Diff(got, want); diff != "" {
+		if diff := cmp.Diff(got, want, cmpopts.EquateComparable(netip.Addr{})); diff != "" {
 			t.Errorf("diff: %s", diff)
 		}
 	})
@@ -442,9 +433,14 @@ func Test_convertLibdnsRecordToAzureRecordSet(t *testing.T) {
 		}
 	})
 	t.Run("type=unsupported", func(t *testing.T) {
-		libdnsRecords := []libdns.Record{{
-			Type: "ERR",
-		}}
+		libdnsRecords := []libdns.Record{
+			libdns.RR{
+				Type: "ERR",
+				Name: "test",
+				TTL:  time.Duration(30) * time.Second,
+				Data: "test",
+			},
+		}
 		_, err := convertLibdnsRecordToAzureRecordSet(libdnsRecords[0])
 		got := err.Error()
 		want := "the type ERR cannot be interpreted"

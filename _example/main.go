@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"time"
 
@@ -39,66 +40,66 @@ func main() {
 
 	// Define test records
 	testRecords := []libdns.Record{
-		{
-			Type:  "A",
-			Name:  "record-a",
-			Value: "127.0.0.1",
-			TTL:   time.Duration(30) * time.Second,
+		libdns.Address{
+			Name: "record-a",
+			TTL:  time.Duration(30) * time.Second,
+			IP:   netip.MustParseAddr("127.0.0.1"),
 		},
-		{
-			Type:  "AAAA",
-			Name:  "record-aaaa",
-			Value: "::1",
-			TTL:   time.Duration(31) * time.Second,
+		libdns.Address{
+			Name: "record-aaaa",
+			TTL:  time.Duration(31) * time.Second,
+			IP:   netip.MustParseAddr("::1"),
 		},
-		{
-			Type:  "CAA",
+		libdns.CAA{
 			Name:  "record-caa",
-			Value: "0 issue 'ca." + zone + "'",
 			TTL:   time.Duration(32) * time.Second,
+			Flags: 0,
+			Tag:   "issue",
+			Value: "ca." + zone,
 		},
-		{
-			Type:  "CNAME",
-			Name:  "record-cname",
-			Value: "www." + zone,
-			TTL:   time.Duration(33) * time.Second,
+		libdns.CNAME{
+			Name:   "record-cname",
+			TTL:    time.Duration(33) * time.Second,
+			Target: "www." + zone,
 		},
-		{
-			Type:  "MX",
-			Name:  "record-mx",
-			Value: "10 mail." + zone,
-			TTL:   time.Duration(34) * time.Second,
+		libdns.MX{
+			Name:       "record-mx",
+			TTL:        time.Duration(34) * time.Second,
+			Preference: 10,
+			Target:     "mail." + zone,
 		},
-		// {
-		// 	Type:  "NS",
+		// libdns.NS{
 		// 	Name:  "@",
-		// 	Value: "ns1.example.com.",
 		// 	TTL:   time.Duration(35) * time.Second,
+		// 	Target: "ns1.example.com.",
 		// },
-		{
-			Type:  "PTR",
-			Name:  "record-ptr",
-			Value: "hoge." + zone,
-			TTL:   time.Duration(36) * time.Second,
+		libdns.SRV{
+			Service:   "service",
+			Transport: "proto",
+			Name:      "record-srv",
+			TTL:       time.Duration(38) * time.Second,
+			Priority:  1,
+			Weight:    10,
+			Port:      5269,
+			Target:    "app." + zone,
 		},
-		// {
+		libdns.TXT{
+			Name: "record-txt",
+			TTL:  time.Duration(39) * time.Second,
+			Text: "TEST VALUE",
+		},
+		libdns.RR{
+			Type: "PTR",
+			Name: "record-ptr",
+			TTL:  time.Duration(36) * time.Second,
+			Data: "hoge." + zone,
+		},
+		// libdns.RR{
 		// 	Type:  "SOA",
 		// 	Name:  "@",
-		// 	Value: "ns1.example.com. hostmaster." + zone + " 1 7200 900 1209600 86400",
 		// 	TTL:   time.Duration(37) * time.Second,
+		// 	Data: "ns1.example.com. hostmaster." + zone + " 1 7200 900 1209600 86400",
 		// },
-		{
-			Type:  "SRV",
-			Name:  "record-srv",
-			Value: "1 10 5269 app." + zone,
-			TTL:   time.Duration(38) * time.Second,
-		},
-		{
-			Type:  "TXT",
-			Name:  "record-txt",
-			Value: "TEST VALUE",
-			TTL:   time.Duration(39) * time.Second,
-		},
 	}
 
 	// Create new records

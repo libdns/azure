@@ -2,6 +2,7 @@ package azure
 
 import (
 	"context"
+	"net/netip"
 	"os"
 	"testing"
 	"time"
@@ -9,11 +10,10 @@ import (
 	"github.com/libdns/libdns"
 )
 
-var testRecord = libdns.Record{
-	Type:  "A",
-	Name:  "libdns-integration-test",
-	Value: "127.0.0.1",
-	TTL:   time.Duration(30) * time.Second,
+var testRecord = libdns.Address{
+	Name: "libdns-integration-test",
+	IP:   netip.MustParseAddr("127.0.0.1"),
+	TTL:  time.Duration(30) * time.Second,
 }
 
 func Test_Authentication(t *testing.T) {
@@ -98,7 +98,7 @@ func Test_GetRecords(t *testing.T) {
 		}
 		isExist := false
 		for _, record := range records {
-			if record.Name == testRecord.Name {
+			if record.RR().Name == testRecord.Name {
 				t.Logf("%v", record)
 				isExist = true
 			}
