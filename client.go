@@ -2,8 +2,12 @@ package azure
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand/v2"
+	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,10 +94,12 @@ func (p *Provider) getRecords(ctx context.Context, zone string) ([]libdns.Record
 	return records, nil
 }
 
-// createRecord creates a new record in the specified zone.
-// It throws an error if the record already exists.
+// createRecord adds a record to the specified zone. Azure stores all records
+// with the same name and type in one record set, so the record is added to
+// the existing set, if any. For example, the ACME challenges of example.com and
+// *.example.com are two TXT values in the same record set.
 func (p *Provider) createRecord(ctx context.Context, zone string, record libdns.Record) (libdns.Record, error) {
-	return p.createOrUpdateRecord(ctx, zone, record, "*")
+	return record, p.modifyRecordSet(ctx, zone, record, addValues)
 }
 
 // updateRecord creates or updates a record, either by updating existing record or creating new one.
@@ -101,20 +107,30 @@ func (p *Provider) updateRecord(ctx context.Context, zone string, record libdns.
 	return p.createOrUpdateRecord(ctx, zone, record, "")
 }
 
-// deleteRecord deletes an existing records.
-// Regardless of the value of the record, if the name and type match, the record will be deleted.
+// deleteRecord deletes a record. Other values in the same record set are kept,
+// and the record set is deleted when it becomes empty. A record without data,
+// or a CNAME or SOA record, deletes the whole record set.
 func (p *Provider) deleteRecord(ctx context.Context, zone string, record libdns.Record) (libdns.Record, error) {
+	rr := record.RR()
+	if rr.Data == "" || rr.Type == "CNAME" || rr.Type == "SOA" {
+		return record, p.deleteRecordSet(ctx, zone, record)
+	}
+	return record, p.modifyRecordSet(ctx, zone, record, removeValues)
+}
+
+// deleteRecordSet deletes the record set with the name and type of record.
+func (p *Provider) deleteRecordSet(ctx context.Context, zone string, record libdns.Record) error {
 	p.client.mutex.Lock()
 	defer p.client.mutex.Unlock()
 
 	if err := p.setupClient(); err != nil {
-		return record, err
+		return err
 	}
 
 	rr := record.RR()
 	recordType, err := convertStringToRecordType(rr.Type)
 	if err != nil {
-		return record, err
+		return err
 	}
 
 	_, err = p.client.azureClient.Delete(
@@ -127,11 +143,7 @@ func (p *Provider) deleteRecord(ctx context.Context, zone string, record libdns.
 			IfMatch: nil,
 		},
 	)
-	if err != nil {
-		return record, err
-	}
-
-	return record, nil
+	return err
 }
 
 // createOrUpdateRecord creates or updates a record.
@@ -172,6 +184,232 @@ func (p *Provider) createOrUpdateRecord(ctx context.Context, zone string, record
 	}
 
 	return record, nil
+}
+
+// maxAttempts bounds how often a record set is read and written again after
+// someone else changed it in between.
+const maxAttempts = 10
+
+// modifyRecordSet adds record's value to its record set, or removes it, without
+// touching the other values. The write is conditional on the record set's etag,
+// so concurrent changes, also from other processes, are not lost.
+func (p *Provider) modifyRecordSet(ctx context.Context, zone string, record libdns.Record, change func(dst, src *armdns.RecordSetProperties) error) error {
+	p.client.mutex.Lock()
+	defer p.client.mutex.Unlock()
+
+	if err := p.setupClient(); err != nil {
+		return err
+	}
+
+	rr := record.RR()
+	recordType, err := convertStringToRecordType(rr.Type)
+	if err != nil {
+		return err
+	}
+	recordSet, err := convertLibdnsRecordToAzureRecordSet(record)
+	if err != nil {
+		return err
+	}
+	zoneName := strings.TrimSuffix(zone, ".")
+	recordSetName := generateRecordSetName(rr.Name, zone)
+
+	for attempt := range maxAttempts {
+		if attempt > 0 {
+			// Jitter, so writers that keep conflicting spread out.
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(rand.N(time.Duration(attempt) * 50 * time.Millisecond)):
+			}
+		}
+
+		current, err := p.client.azureClient.Get(
+			ctx,
+			p.ResourceGroupName,
+			zoneName,
+			recordSetName,
+			recordType,
+			nil,
+		)
+		missing := hasStatus(err, http.StatusNotFound)
+		if err != nil && !missing {
+			return err
+		}
+
+		properties := &armdns.RecordSetProperties{
+			TTL: recordSet.Properties.TTL,
+		}
+		var etag *string
+		if !missing && current.Properties != nil {
+			properties = copyRecordSetProperties(current.Properties)
+			etag = current.Etag
+		}
+		if err := change(properties, recordSet.Properties); err != nil {
+			return fmt.Errorf("%s record set %q: %w", recordType, recordSetName, err)
+		}
+
+		if isEmpty(properties) {
+			if missing {
+				return nil
+			}
+			_, err = p.client.azureClient.Delete(
+				ctx,
+				p.ResourceGroupName,
+				zoneName,
+				recordSetName,
+				recordType,
+				&armdns.RecordSetsClientDeleteOptions{
+					IfMatch: etag,
+				},
+			)
+		} else {
+			options := &armdns.RecordSetsClientCreateOrUpdateOptions{
+				IfMatch: etag,
+			}
+			if missing {
+				options = &armdns.RecordSetsClientCreateOrUpdateOptions{
+					IfNoneMatch: to.Ptr("*"),
+				}
+			}
+			_, err = p.client.azureClient.CreateOrUpdate(
+				ctx,
+				p.ResourceGroupName,
+				zoneName,
+				recordSetName,
+				recordType,
+				armdns.RecordSet{Properties: properties},
+				options,
+			)
+		}
+		if !hasStatus(err, http.StatusPreconditionFailed) {
+			return err
+		}
+	}
+
+	return fmt.Errorf("%s record set %q kept changing, gave up after %d attempts", recordType, recordSetName, maxAttempts)
+}
+
+// hasStatus reports whether err is an Azure API error with the given HTTP status.
+func hasStatus(err error, status int) bool {
+	var respErr *azcore.ResponseError
+	return errors.As(err, &respErr) && respErr.StatusCode == status
+}
+
+// copyRecordSetProperties returns the writable properties of a record set.
+func copyRecordSetProperties(p *armdns.RecordSetProperties) *armdns.RecordSetProperties {
+	properties := &armdns.RecordSetProperties{
+		TTL:         p.TTL,
+		Metadata:    p.Metadata,
+		ARecords:    slices.Clone(p.ARecords),
+		AaaaRecords: slices.Clone(p.AaaaRecords),
+		CaaRecords:  slices.Clone(p.CaaRecords),
+		CnameRecord: p.CnameRecord,
+		MxRecords:   slices.Clone(p.MxRecords),
+		NsRecords:   slices.Clone(p.NsRecords),
+		PtrRecords:  slices.Clone(p.PtrRecords),
+		SoaRecord:   p.SoaRecord,
+		SrvRecords:  slices.Clone(p.SrvRecords),
+		TxtRecords:  slices.Clone(p.TxtRecords),
+	}
+	// Azure returns an empty target resource for record sets that aren't aliases.
+	if p.TargetResource != nil && p.TargetResource.ID != nil {
+		properties.TargetResource = p.TargetResource
+	}
+	return properties
+}
+
+// isEmpty reports whether a record set has no values left.
+func isEmpty(p *armdns.RecordSetProperties) bool {
+	return len(p.ARecords) == 0 && len(p.AaaaRecords) == 0 && len(p.CaaRecords) == 0 &&
+		p.CnameRecord == nil && len(p.MxRecords) == 0 && len(p.NsRecords) == 0 &&
+		len(p.PtrRecords) == 0 && p.SoaRecord == nil && len(p.SrvRecords) == 0 &&
+		len(p.TxtRecords) == 0 && p.TargetResource == nil
+}
+
+// addValues adds the values of src to dst, skipping the ones dst already has.
+func addValues(dst, src *armdns.RecordSetProperties) error {
+	if src.CnameRecord != nil || src.SoaRecord != nil {
+		// A record set holds a single CNAME or SOA value.
+		if !isEmpty(dst) {
+			return errors.New("already exists")
+		}
+		dst.CnameRecord = src.CnameRecord
+		dst.SoaRecord = src.SoaRecord
+		return nil
+	}
+	dst.ARecords = appendMissing(dst.ARecords, src.ARecords, sameA)
+	dst.AaaaRecords = appendMissing(dst.AaaaRecords, src.AaaaRecords, sameAAAA)
+	dst.CaaRecords = appendMissing(dst.CaaRecords, src.CaaRecords, sameCAA)
+	dst.MxRecords = appendMissing(dst.MxRecords, src.MxRecords, sameMX)
+	dst.NsRecords = appendMissing(dst.NsRecords, src.NsRecords, sameNS)
+	dst.PtrRecords = appendMissing(dst.PtrRecords, src.PtrRecords, samePTR)
+	dst.SrvRecords = appendMissing(dst.SrvRecords, src.SrvRecords, sameSRV)
+	dst.TxtRecords = appendMissing(dst.TxtRecords, src.TxtRecords, sameTXT)
+	return nil
+}
+
+// removeValues removes the values of src from dst.
+func removeValues(dst, src *armdns.RecordSetProperties) error {
+	dst.ARecords = deleteMatching(dst.ARecords, src.ARecords, sameA)
+	dst.AaaaRecords = deleteMatching(dst.AaaaRecords, src.AaaaRecords, sameAAAA)
+	dst.CaaRecords = deleteMatching(dst.CaaRecords, src.CaaRecords, sameCAA)
+	dst.MxRecords = deleteMatching(dst.MxRecords, src.MxRecords, sameMX)
+	dst.NsRecords = deleteMatching(dst.NsRecords, src.NsRecords, sameNS)
+	dst.PtrRecords = deleteMatching(dst.PtrRecords, src.PtrRecords, samePTR)
+	dst.SrvRecords = deleteMatching(dst.SrvRecords, src.SrvRecords, sameSRV)
+	dst.TxtRecords = deleteMatching(dst.TxtRecords, src.TxtRecords, sameTXT)
+	return nil
+}
+
+// appendMissing appends the values of src that dst does not have yet.
+func appendMissing[T any](dst, src []*T, same func(a, b *T) bool) []*T {
+	for _, s := range src {
+		if !slices.ContainsFunc(dst, func(d *T) bool { return same(d, s) }) {
+			dst = append(dst, s)
+		}
+	}
+	return dst
+}
+
+// deleteMatching removes the values of src from dst.
+func deleteMatching[T any](dst, src []*T, same func(a, b *T) bool) []*T {
+	return slices.DeleteFunc(dst, func(d *T) bool {
+		return slices.ContainsFunc(src, func(s *T) bool { return same(d, s) })
+	})
+}
+
+// val dereferences p, returning the zero value for nil.
+func val[T any](p *T) (v T) {
+	if p != nil {
+		v = *p
+	}
+	return v
+}
+
+// sameA and the other same* functions report whether two values of a record set are equal.
+func sameA(a, b *armdns.ARecord) bool { return val(a.IPv4Address) == val(b.IPv4Address) }
+
+func sameAAAA(a, b *armdns.AaaaRecord) bool { return val(a.IPv6Address) == val(b.IPv6Address) }
+
+func sameCAA(a, b *armdns.CaaRecord) bool {
+	return val(a.Flags) == val(b.Flags) && val(a.Tag) == val(b.Tag) && val(a.Value) == val(b.Value)
+}
+
+func sameMX(a, b *armdns.MxRecord) bool {
+	return val(a.Preference) == val(b.Preference) && val(a.Exchange) == val(b.Exchange)
+}
+
+func sameNS(a, b *armdns.NsRecord) bool { return val(a.Nsdname) == val(b.Nsdname) }
+
+func samePTR(a, b *armdns.PtrRecord) bool { return val(a.Ptrdname) == val(b.Ptrdname) }
+
+func sameSRV(a, b *armdns.SrvRecord) bool {
+	return val(a.Priority) == val(b.Priority) && val(a.Weight) == val(b.Weight) &&
+		val(a.Port) == val(b.Port) && val(a.Target) == val(b.Target)
+}
+
+func sameTXT(a, b *armdns.TxtRecord) bool {
+	return slices.EqualFunc(a.Value, b.Value, func(x, y *string) bool { return val(x) == val(y) })
 }
 
 // generateRecordSetName generates name for RecordSet object.

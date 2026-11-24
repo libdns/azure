@@ -16,6 +16,12 @@ var testRecord = libdns.Address{
 	TTL:  time.Duration(30) * time.Second,
 }
 
+var testRecord2 = libdns.Address{
+	Name: "libdns-integration-test",
+	IP:   netip.MustParseAddr("127.0.0.2"),
+	TTL:  time.Duration(30) * time.Second,
+}
+
 func Test_Authentication(t *testing.T) {
 	isIntegrationTest := os.Getenv("LIBDNS_AZURE_INTEGRATION_TEST")
 	if isIntegrationTest == "" {
@@ -141,14 +147,33 @@ func Test_AppendRecords(t *testing.T) {
 			t.Errorf("%s", err)
 		}
 	})
-	t.Run("append-failure", func(t *testing.T) {
+	t.Run("append-existing", func(t *testing.T) {
 		_, err := provider.AppendRecords(context.TODO(), os.Getenv("LIBDNS_AZURE_DNS_ZONE_FQDN"), []libdns.Record{testRecord})
-		if err == nil {
+		if err != nil {
 			t.Errorf("%s", err)
 		}
 	})
+	t.Run("append-to-record-set", func(t *testing.T) {
+		_, err := provider.AppendRecords(context.TODO(), os.Getenv("LIBDNS_AZURE_DNS_ZONE_FQDN"), []libdns.Record{testRecord2})
+		if err != nil {
+			t.Errorf("%s", err)
+		}
+		records, err := provider.GetRecords(context.TODO(), os.Getenv("LIBDNS_AZURE_DNS_ZONE_FQDN"))
+		if err != nil {
+			t.Errorf("%s", err)
+		}
+		count := 0
+		for _, record := range records {
+			if record.RR().Name == testRecord.Name {
+				count++
+			}
+		}
+		if count != 2 {
+			t.Errorf("got: %d records, want: 2", count)
+		}
+	})
 	t.Run("append-cleanup", func(t *testing.T) {
-		_, err := provider.DeleteRecords(context.TODO(), os.Getenv("LIBDNS_AZURE_DNS_ZONE_FQDN"), []libdns.Record{testRecord})
+		_, err := provider.DeleteRecords(context.TODO(), os.Getenv("LIBDNS_AZURE_DNS_ZONE_FQDN"), []libdns.Record{testRecord, testRecord2})
 		if err != nil {
 			t.Errorf("%s", err)
 		}
