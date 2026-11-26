@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -257,6 +260,16 @@ func getFakeRecordSetsServer() fake.RecordSetsServer {
 			resp.SetResponse(http.StatusOK, response, nil)
 			return
 		},
+		Get: func(ctx context.Context, resourceGroupName string, zoneName string, relativeRecordSetName string, recordType armdns.RecordType, options *armdns.RecordSetsClientGetOptions) (resp azfake.Responder[armdns.RecordSetsClientGetResponse], errResp azfake.ErrorResponder) {
+			for _, v := range azureFakeRecords {
+				if *v.Name == relativeRecordSetName && strings.HasSuffix(*v.Type, "/"+string(recordType)) {
+					resp.SetResponse(http.StatusOK, armdns.RecordSetsClientGetResponse{RecordSet: v}, nil)
+					return
+				}
+			}
+			errResp.SetResponseError(http.StatusNotFound, "NotFound")
+			return
+		},
 		Delete: func(ctx context.Context, resourceGroupName string, zoneName string, relativeRecordSetName string, recordType armdns.RecordType, options *armdns.RecordSetsClientDeleteOptions) (resp azfake.Responder[armdns.RecordSetsClientDeleteResponse], errResp azfake.ErrorResponder) {
 			response := armdns.RecordSetsClientDeleteResponse{}
 			resp.SetResponse(http.StatusOK, response, nil)
@@ -448,4 +461,261 @@ func Test_convertLibdnsRecordToAzureRecordSet(t *testing.T) {
 			t.Errorf("diff: %s", diff)
 		}
 	})
+}
+
+// fakeZoneServer is an in-memory Azure DNS zone that honors If-Match and
+// If-None-Match like Azure does.
+type fakeZoneServer struct {
+	mu   sync.Mutex
+	sets map[string]armdns.RecordSet
+	etag int
+	// beforeWrite, if set, runs before each write is checked, to simulate a
+	// concurrent change.
+	beforeWrite func()
+}
+
+func newFakeZoneServer() *fakeZoneServer {
+	return &fakeZoneServer{sets: map[string]armdns.RecordSet{}}
+}
+
+func setKey(name string, typ armdns.RecordType) string { return name + "/" + string(typ) }
+
+// put stores a record set the way another client would.
+func (z *fakeZoneServer) put(name string, typ armdns.RecordType, props *armdns.RecordSetProperties) {
+	z.etag++
+	// Like Azure, return an empty target resource for record sets that
+	// aren't aliases.
+	stored := *props
+	if stored.TargetResource == nil {
+		stored.TargetResource = &armdns.SubResource{}
+	}
+	z.sets[setKey(name, typ)] = armdns.RecordSet{
+		Name:       to.Ptr(name),
+		Type:       to.Ptr("Microsoft.Network/dnszones/" + string(typ)),
+		Etag:       to.Ptr(fmt.Sprint(z.etag)),
+		Properties: &stored,
+	}
+}
+
+// preconditionFailed reports whether a write with these conditions must be
+// rejected.
+func (z *fakeZoneServer) preconditionFailed(key string, ifMatch, ifNoneMatch *string) bool {
+	if z.beforeWrite != nil {
+		f := z.beforeWrite
+		z.beforeWrite = nil
+		f()
+	}
+	cur, exists := z.sets[key]
+	if val(ifNoneMatch) == "*" && exists {
+		return true
+	}
+	return ifMatch != nil && (!exists || *ifMatch != *cur.Etag)
+}
+
+func (z *fakeZoneServer) server() *fake.RecordSetsServer {
+	return &fake.RecordSetsServer{
+		Get: func(ctx context.Context, resourceGroupName, zoneName, name string, typ armdns.RecordType, options *armdns.RecordSetsClientGetOptions) (resp azfake.Responder[armdns.RecordSetsClientGetResponse], errResp azfake.ErrorResponder) {
+			z.mu.Lock()
+			defer z.mu.Unlock()
+			set, ok := z.sets[setKey(name, typ)]
+			if !ok {
+				errResp.SetResponseError(http.StatusNotFound, "NotFound")
+				return
+			}
+			resp.SetResponse(http.StatusOK, armdns.RecordSetsClientGetResponse{RecordSet: set}, nil)
+			return
+		},
+		CreateOrUpdate: func(ctx context.Context, resourceGroupName, zoneName, name string, typ armdns.RecordType, parameters armdns.RecordSet, options *armdns.RecordSetsClientCreateOrUpdateOptions) (resp azfake.Responder[armdns.RecordSetsClientCreateOrUpdateResponse], errResp azfake.ErrorResponder) {
+			z.mu.Lock()
+			defer z.mu.Unlock()
+			key := setKey(name, typ)
+			if z.preconditionFailed(key, options.IfMatch, options.IfNoneMatch) {
+				errResp.SetResponseError(http.StatusPreconditionFailed, "PreconditionFailed")
+				return
+			}
+			z.put(name, typ, parameters.Properties)
+			resp.SetResponse(http.StatusOK, armdns.RecordSetsClientCreateOrUpdateResponse{RecordSet: z.sets[key]}, nil)
+			return
+		},
+		Delete: func(ctx context.Context, resourceGroupName, zoneName, name string, typ armdns.RecordType, options *armdns.RecordSetsClientDeleteOptions) (resp azfake.Responder[armdns.RecordSetsClientDeleteResponse], errResp azfake.ErrorResponder) {
+			z.mu.Lock()
+			defer z.mu.Unlock()
+			key := setKey(name, typ)
+			if z.preconditionFailed(key, options.IfMatch, nil) {
+				errResp.SetResponseError(http.StatusPreconditionFailed, "PreconditionFailed")
+				return
+			}
+			delete(z.sets, key)
+			resp.SetResponse(http.StatusOK, armdns.RecordSetsClientDeleteResponse{}, nil)
+			return
+		},
+	}
+}
+
+// txtValues returns the TXT values of a record set, nil if it doesn't exist.
+func (z *fakeZoneServer) txtValues(name string) []string {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+	set, ok := z.sets[setKey(name, armdns.RecordTypeTXT)]
+	if !ok {
+		return nil
+	}
+	values := []string{}
+	for _, r := range set.Properties.TxtRecords {
+		for _, v := range r.Value {
+			values = append(values, *v)
+		}
+	}
+	slices.Sort(values)
+	return values
+}
+
+// newZoneProvider returns a provider backed by z. Each provider has its own
+// mutex, like separate processes.
+func getFakeZoneProvider(t *testing.T, z *fakeZoneServer) *Provider {
+	t.Helper()
+	client, err := armdns.NewRecordSetsClient("sub", &azfake.TokenCredential{}, &arm.ClientOptions{
+		ClientOptions: azcore.ClientOptions{Transport: fake.NewRecordSetsServerTransport(z.server())},
+	})
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+	return &Provider{SubscriptionId: "sub", ResourceGroupName: "rg", client: Client{azureClient: client}}
+}
+
+// fakeChallengeRecord returns an ACME challenge record with the given value.
+func fakeChallengeRecord(text string) libdns.Record {
+	return libdns.TXT{Name: "_acme-challenge", TTL: time.Minute, Text: text}
+}
+
+func Test_modifyRecordSet(t *testing.T) {
+	type step struct {
+		append bool
+		text   string
+		want   []string
+	}
+	tests := []struct {
+		name  string
+		steps []step
+	}{{
+		name: "apex and wildcard challenges share a record set",
+		steps: []step{
+			{append: true, text: "apex", want: []string{"apex"}},
+			{append: true, text: "wildcard", want: []string{"apex", "wildcard"}},
+			{append: false, text: "apex", want: []string{"wildcard"}},
+			{append: false, text: "wildcard", want: nil},
+		},
+	}, {
+		name: "appending an existing value keeps one copy",
+		steps: []step{
+			{append: true, text: "a", want: []string{"a"}},
+			{append: true, text: "a", want: []string{"a"}},
+		},
+	}, {
+		name: "deleting a missing value changes nothing",
+		steps: []step{
+			{append: false, text: "a", want: nil},
+			{append: true, text: "a", want: []string{"a"}},
+			{append: false, text: "b", want: []string{"a"}},
+		},
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			z := newFakeZoneServer()
+			p := getFakeZoneProvider(t, z)
+			for i, s := range tt.steps {
+				var err error
+				if s.append {
+					_, err = p.AppendRecords(context.TODO(), "example.com.", []libdns.Record{fakeChallengeRecord(s.text)})
+				} else {
+					_, err = p.DeleteRecords(context.TODO(), "example.com.", []libdns.Record{fakeChallengeRecord(s.text)})
+				}
+				if err != nil {
+					t.Fatalf("step %d: %s", i, err)
+				}
+				got := z.txtValues("_acme-challenge")
+				if diff := cmp.Diff(got, s.want); diff != "" {
+					t.Fatalf("step %d: diff: %s", i, diff)
+				}
+			}
+		})
+	}
+}
+
+func Test_modifyRecordSet_concurrentChange(t *testing.T) {
+	tests := []struct {
+		name   string
+		append bool
+		want   []string
+	}{
+		{name: "append", append: true, want: []string{"mine", "other", "theirs"}},
+		{name: "delete", append: false, want: []string{"other", "theirs"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			z := newFakeZoneServer()
+			p := getFakeZoneProvider(t, z)
+			z.put("_acme-challenge", armdns.RecordTypeTXT, &armdns.RecordSetProperties{
+				TTL:        to.Ptr[int64](60),
+				TxtRecords: []*armdns.TxtRecord{{Value: []*string{to.Ptr("mine")}}, {Value: []*string{to.Ptr("other")}}},
+			})
+			z.beforeWrite = func() {
+				set := z.sets[setKey("_acme-challenge", armdns.RecordTypeTXT)]
+				props := copyRecordSetProperties(set.Properties)
+				props.TxtRecords = append(props.TxtRecords, &armdns.TxtRecord{Value: []*string{to.Ptr("theirs")}})
+				z.put("_acme-challenge", armdns.RecordTypeTXT, props)
+			}
+
+			var err error
+			if tt.append {
+				_, err = p.AppendRecords(context.TODO(), "example.com.", []libdns.Record{fakeChallengeRecord("mine")})
+			} else {
+				_, err = p.DeleteRecords(context.TODO(), "example.com.", []libdns.Record{fakeChallengeRecord("mine")})
+			}
+			if err != nil {
+				t.Fatalf("%s", err)
+			}
+			got := z.txtValues("_acme-challenge")
+			if diff := cmp.Diff(got, tt.want); diff != "" {
+				t.Errorf("diff: %s", diff)
+			}
+		})
+	}
+}
+
+func Test_modifyRecordSet_parallelAppends(t *testing.T) {
+	z := newFakeZoneServer()
+	var want []string
+	var wg sync.WaitGroup
+	for i := range 10 {
+		text := fmt.Sprint("value", i)
+		want = append(want, text)
+		p := getFakeZoneProvider(t, z)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := p.AppendRecords(context.TODO(), "example.com.", []libdns.Record{fakeChallengeRecord(text)}); err != nil {
+				t.Errorf("%s", err)
+			}
+		}()
+	}
+	wg.Wait()
+	slices.Sort(want)
+	got := z.txtValues("_acme-challenge")
+	if diff := cmp.Diff(got, want); diff != "" {
+		t.Errorf("diff: %s", diff)
+	}
+}
+
+func Test_createRecord_existingCNAME(t *testing.T) {
+	z := newFakeZoneServer()
+	p := getFakeZoneProvider(t, z)
+	rec := libdns.CNAME{Name: "www", TTL: time.Minute, Target: "a.example.com."}
+	if _, err := p.AppendRecords(context.TODO(), "example.com.", []libdns.Record{rec}); err != nil {
+		t.Fatalf("%s", err)
+	}
+	rec.Target = "b.example.com."
+	if _, err := p.AppendRecords(context.TODO(), "example.com.", []libdns.Record{rec}); err == nil {
+		t.Error("appending a second CNAME succeeded")
+	}
 }
