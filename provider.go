@@ -2,6 +2,7 @@ package azure
 
 import (
 	"context"
+	"strings"
 
 	"github.com/libdns/libdns"
 )
@@ -66,15 +67,29 @@ func (p *Provider) AppendRecords(ctx context.Context, zone string, records []lib
 
 // SetRecords sets the records in the zone, either by updating existing records
 // or creating new ones. It returns the updated records.
+//
+// For each name and type in records, the values in the zone are replaced by
+// the given ones, and the TTL is the lowest TTL of them. Setting records of
+// different names or types is not atomic.
 func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
-	var updatedRecords []libdns.Record
-
+	type recordSetKey struct{ name, recordType string }
+	var keys []recordSetKey
+	groups := map[recordSetKey][]libdns.Record{}
 	for _, record := range records {
-		updatedRecord, err := p.updateRecord(ctx, zone, record)
-		if err != nil {
+		rr := record.RR()
+		key := recordSetKey{generateRecordSetName(rr.Name, zone), strings.ToUpper(rr.Type)}
+		if _, ok := groups[key]; !ok {
+			keys = append(keys, key)
+		}
+		groups[key] = append(groups[key], record)
+	}
+
+	var updatedRecords []libdns.Record
+	for _, key := range keys {
+		if err := p.setRecordSet(ctx, zone, groups[key]); err != nil {
 			return nil, err
 		}
-		updatedRecords = append(updatedRecords, updatedRecord)
+		updatedRecords = append(updatedRecords, groups[key]...)
 	}
 
 	return updatedRecords, nil
