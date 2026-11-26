@@ -318,12 +318,75 @@ func Test_createRecord(t *testing.T) {
 	}
 }
 
-func Test_updateRecord(t *testing.T) {
-	provider := getFakeProvider()
-	record, err := provider.updateRecord(context.TODO(), "example.com.", libdnsFakeRecords[0])
-	t.Log(record)
+func Test_SetRecords_ttl(t *testing.T) {
+	txt := func(ttl time.Duration, text string) libdns.Record {
+		return libdns.TXT{Name: "t", TTL: ttl, Text: text}
+	}
+	tests := []struct {
+		name    string
+		records []libdns.Record
+		want    int64
+	}{
+		{name: "lowest", records: []libdns.Record{txt(time.Hour, "a"), txt(time.Minute, "b")}, want: 60},
+		{name: "unspecified first", records: []libdns.Record{txt(0, "a"), txt(time.Minute, "b")}, want: 60},
+		{name: "unspecified last", records: []libdns.Record{txt(time.Minute, "a"), txt(0, "b")}, want: 60},
+		{name: "all unspecified", records: []libdns.Record{txt(0, "a"), txt(0, "b")}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			z := newFakeZoneServer()
+			p := getFakeZoneProvider(t, z)
+			if _, err := p.SetRecords(context.TODO(), "example.com.", tt.records); err != nil {
+				t.Fatalf("%s", err)
+			}
+			if got := *z.sets[setKey("t", armdns.RecordTypeTXT)].Properties.TTL; got != tt.want {
+				t.Errorf("got TTL %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_SetRecords_values(t *testing.T) {
+	z := newFakeZoneServer()
+	p := getFakeZoneProvider(t, z)
+	ctx := context.TODO()
+	a := libdns.TXT{Name: "_acme-challenge", TTL: time.Hour, Text: "a"}
+	b := libdns.TXT{Name: "_acme-challenge.example.com.", TTL: time.Minute, Text: "b"}
+	other := libdns.TXT{Name: "other", TTL: time.Hour, Text: "c"}
+
+	if _, err := p.AppendRecords(ctx, "example.com.", []libdns.Record{fakeChallengeRecord("old")}); err != nil {
+		t.Fatalf("%s", err)
+	}
+	got, err := p.SetRecords(ctx, "example.com.", []libdns.Record{a, other, b})
 	if err != nil {
-		t.Errorf("%s", err)
+		t.Fatalf("%s", err)
+	}
+	if diff := cmp.Diff(got, []libdns.Record{a, b, other}); diff != "" {
+		t.Errorf("returned records diff: %s", diff)
+	}
+	if diff := cmp.Diff(z.txtValues("_acme-challenge"), []string{"a", "b"}); diff != "" {
+		t.Errorf("values diff: %s", diff)
+	}
+	if diff := cmp.Diff(z.txtValues("other"), []string{"c"}); diff != "" {
+		t.Errorf("other values diff: %s", diff)
+	}
+	if ttl := *z.sets[setKey("_acme-challenge", armdns.RecordTypeTXT)].Properties.TTL; ttl != 60 {
+		t.Errorf("got TTL %d, want the lowest TTL, 60", ttl)
+	}
+
+	// Setting fewer values removes the others.
+	if _, err := p.SetRecords(ctx, "example.com.", []libdns.Record{a}); err != nil {
+		t.Fatalf("%s", err)
+	}
+	if diff := cmp.Diff(z.txtValues("_acme-challenge"), []string{"a"}); diff != "" {
+		t.Errorf("values diff: %s", diff)
+	}
+
+	// A record set holds a single CNAME.
+	cname := libdns.CNAME{Name: "www", TTL: time.Minute, Target: "a.example.com."}
+	otherCname := libdns.CNAME{Name: "www", TTL: time.Minute, Target: "b.example.com."}
+	if _, err := p.SetRecords(ctx, "example.com.", []libdns.Record{cname, otherCname}); err == nil {
+		t.Error("setting two CNAME values succeeded")
 	}
 }
 
@@ -529,7 +592,11 @@ func (z *fakeZoneServer) server() *fake.RecordSetsServer {
 			z.mu.Lock()
 			defer z.mu.Unlock()
 			key := setKey(name, typ)
-			if z.preconditionFailed(key, options.IfMatch, options.IfNoneMatch) {
+			var ifMatch, ifNoneMatch *string
+			if options != nil {
+				ifMatch, ifNoneMatch = options.IfMatch, options.IfNoneMatch
+			}
+			if z.preconditionFailed(key, ifMatch, ifNoneMatch) {
 				errResp.SetResponseError(http.StatusPreconditionFailed, "PreconditionFailed")
 				return
 			}

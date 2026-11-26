@@ -47,6 +47,7 @@ Azure DNS keeps all records with the same name and type in one record set, which
 
 - `AppendRecords` adds the values to the existing record set, or creates it. Values that the record set already has are skipped and not returned. The TTL of an existing record set is kept.
 - `DeleteRecords` removes only the given values, and deletes the record set when no value is left. Values that the record set doesn't have are skipped and not returned. The TTL is not compared. A record with empty data deletes the whole record set.
+- `SetRecords` replaces the values of each name and type in the given records with the given values, so that multiple values for the same name and type are all kept. The TTL of the record set is the lowest TTL of them, ignoring records without a TTL. Setting records of different names or types is not atomic.
 - `AppendRecords` and `DeleteRecords` are safe against concurrent changes, also from other processes.
 
 ## Example

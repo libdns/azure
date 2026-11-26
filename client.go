@@ -110,11 +110,6 @@ func (p *Provider) createRecord(ctx context.Context, zone string, record libdns.
 	})
 }
 
-// updateRecord creates or updates a record, either by updating existing record or creating new one.
-func (p *Provider) updateRecord(ctx context.Context, zone string, record libdns.Record) (libdns.Record, error) {
-	return p.createOrUpdateRecord(ctx, zone, record, "")
-}
-
 // deleteRecord deletes a record. Other values in the same record set are kept,
 // and the record set is deleted when it becomes empty. The TTL is not compared,
 // because Azure has a single TTL per record set. A record without data deletes
@@ -134,25 +129,36 @@ func (p *Provider) deleteRecord(ctx context.Context, zone string, record libdns.
 	})
 }
 
-// createOrUpdateRecord creates or updates a record.
-// The behavior depends on the value of ifNoneMatch, set to "*" to allow to create a new record but prevent updating an existing record.
-func (p *Provider) createOrUpdateRecord(ctx context.Context, zone string, record libdns.Record, ifNoneMatch string) (libdns.Record, error) {
+// setRecordSet replaces the record set with the name and type of records by
+// the values of records, which all share one name and one type. The TTL of the
+// record set is the lowest TTL of records.
+func (p *Provider) setRecordSet(ctx context.Context, zone string, records []libdns.Record) error {
 	p.client.mutex.Lock()
 	defer p.client.mutex.Unlock()
 
 	if err := p.setupClient(); err != nil {
-		return record, err
+		return err
 	}
 
-	rr := record.RR()
+	rr := records[0].RR()
 	recordType, err := convertStringToRecordType(rr.Type)
 	if err != nil {
-		return record, err
+		return err
 	}
 
-	recordSet, err := convertLibdnsRecordToAzureRecordSet(record)
-	if err != nil {
-		return record, err
+	properties := &armdns.RecordSetProperties{}
+	for _, record := range records {
+		recordSet, err := convertLibdnsRecordToAzureRecordSet(record)
+		if err != nil {
+			return err
+		}
+		if _, err := addValues(properties, recordSet.Properties); err != nil {
+			return fmt.Errorf("%s record set %q: %w", recordType, generateRecordSetName(rr.Name, zone), err)
+		}
+		// A TTL of 0 is unspecified, so it only stays if no record has a TTL.
+		if ttl := recordSet.Properties.TTL; *ttl != 0 && (*properties.TTL == 0 || *ttl < *properties.TTL) {
+			properties.TTL = ttl
+		}
 	}
 
 	_, err = p.client.azureClient.CreateOrUpdate(
@@ -161,17 +167,10 @@ func (p *Provider) createOrUpdateRecord(ctx context.Context, zone string, record
 		strings.TrimSuffix(zone, "."),
 		generateRecordSetName(rr.Name, zone),
 		recordType,
-		recordSet,
-		&armdns.RecordSetsClientCreateOrUpdateOptions{
-			IfMatch:     nil,
-			IfNoneMatch: &ifNoneMatch,
-		},
+		armdns.RecordSet{Properties: properties},
+		nil,
 	)
-	if err != nil {
-		return record, err
-	}
-
-	return record, nil
+	return err
 }
 
 // maxAttempts bounds how often a record set is read and written again after
@@ -626,7 +625,6 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*armdns.RecordSet) ([]li
 
 // convertLibdnsRecordToAzureRecordSet converts a libdns record to an Azure-styled record.
 func convertLibdnsRecordToAzureRecordSet(record libdns.Record) (armdns.RecordSet, error) {
-	fmt.Println("record:", record)
 	rr, err := record.RR().Parse()
 	if err != nil {
 		return armdns.RecordSet{}, fmt.Errorf("unable to parse libdns.RR: %w", err)
