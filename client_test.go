@@ -318,6 +318,34 @@ func Test_createRecord(t *testing.T) {
 	}
 }
 
+func Test_SetRecords_ttl(t *testing.T) {
+	txt := func(ttl time.Duration, text string) libdns.Record {
+		return libdns.TXT{Name: "t", TTL: ttl, Text: text}
+	}
+	tests := []struct {
+		name    string
+		records []libdns.Record
+		want    int64
+	}{
+		{name: "lowest", records: []libdns.Record{txt(time.Hour, "a"), txt(time.Minute, "b")}, want: 60},
+		{name: "unspecified first", records: []libdns.Record{txt(0, "a"), txt(time.Minute, "b")}, want: 60},
+		{name: "unspecified last", records: []libdns.Record{txt(time.Minute, "a"), txt(0, "b")}, want: 60},
+		{name: "all unspecified", records: []libdns.Record{txt(0, "a"), txt(0, "b")}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			z := newFakeZoneServer()
+			p := getFakeZoneProvider(t, z)
+			if _, err := p.SetRecords(context.TODO(), "example.com.", tt.records); err != nil {
+				t.Fatalf("%s", err)
+			}
+			if got := *z.sets[setKey("t", armdns.RecordTypeTXT)].Properties.TTL; got != tt.want {
+				t.Errorf("got TTL %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func Test_SetRecords_values(t *testing.T) {
 	z := newFakeZoneServer()
 	p := getFakeZoneProvider(t, z)

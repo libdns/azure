@@ -152,11 +152,11 @@ func (p *Provider) setRecordSet(ctx context.Context, zone string, records []libd
 		if err != nil {
 			return err
 		}
-		ttl := recordSet.Properties.TTL
 		if _, err := addValues(properties, recordSet.Properties); err != nil {
 			return fmt.Errorf("%s record set %q: %w", recordType, generateRecordSetName(rr.Name, zone), err)
 		}
-		if *ttl < *properties.TTL {
+		// A TTL of 0 is unspecified, so it only stays if no record has a TTL.
+		if ttl := recordSet.Properties.TTL; *ttl != 0 && (*properties.TTL == 0 || *ttl < *properties.TTL) {
 			properties.TTL = ttl
 		}
 	}
@@ -625,7 +625,6 @@ func convertAzureRecordSetsToLibdnsRecords(recordSets []*armdns.RecordSet) ([]li
 
 // convertLibdnsRecordToAzureRecordSet converts a libdns record to an Azure-styled record.
 func convertLibdnsRecordToAzureRecordSet(record libdns.Record) (armdns.RecordSet, error) {
-	fmt.Println("record:", record)
 	rr, err := record.RR().Parse()
 	if err != nil {
 		return armdns.RecordSet{}, fmt.Errorf("unable to parse libdns.RR: %w", err)
