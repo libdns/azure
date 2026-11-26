@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -293,6 +295,65 @@ func getFakeProvider() (provider Provider) {
 		},
 	}
 	return
+}
+
+func Test_newCredentials(t *testing.T) {
+	// A non-https value makes creating the credentials fail.
+	t.Setenv("AZURE_AUTHORITY_HOST", "")
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("token"), 0o600); err != nil {
+		t.Fatalf("%s", err)
+	}
+	setWorkloadIdentityEnv := func(t *testing.T) {
+		t.Setenv("AZURE_TENANT_ID", "tenant")
+		t.Setenv("AZURE_CLIENT_ID", "client")
+		t.Setenv("AZURE_FEDERATED_TOKEN_FILE", tokenFile)
+	}
+	clearWorkloadIdentityEnv := func(t *testing.T) {
+		for _, name := range []string{"AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_FEDERATED_TOKEN_FILE"} {
+			t.Setenv(name, "")
+		}
+	}
+	typeNames := func(credentials []azcore.TokenCredential) (names []string) {
+		for _, c := range credentials {
+			names = append(names, fmt.Sprintf("%T", c))
+		}
+		return names
+	}
+
+	tests := []struct {
+		name     string
+		provider *Provider
+		env      func(t *testing.T)
+		want     []string
+	}{{
+		name:     "managed identity only",
+		provider: &Provider{},
+		env:      clearWorkloadIdentityEnv,
+		want:     []string{"*azidentity.ManagedIdentityCredential"},
+	}, {
+		name:     "workload identity before managed identity",
+		provider: &Provider{},
+		env:      setWorkloadIdentityEnv,
+		want:     []string{"*azidentity.WorkloadIdentityCredential", "*azidentity.ManagedIdentityCredential"},
+	}, {
+		name:     "client secret takes precedence",
+		provider: &Provider{TenantId: "tenant", ClientId: "client", ClientSecret: "secret"},
+		env:      setWorkloadIdentityEnv,
+		want:     []string{"*azidentity.ClientSecretCredential"},
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.env(t)
+			credentials, err := tt.provider.newCredentials()
+			if err != nil {
+				t.Fatalf("%s", err)
+			}
+			if diff := cmp.Diff(typeNames(credentials), tt.want); diff != "" {
+				t.Errorf("diff: %s", diff)
+			}
+		})
+	}
 }
 
 func Test_getRecords(t *testing.T) {

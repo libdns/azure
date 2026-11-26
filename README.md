@@ -4,7 +4,7 @@ This package implements the libdns interfaces for the [Azure DNS API](https://do
 
 ## Authenticating
 
-This package supports authentication using **a service principal with a secret** and **a managed identity** through [azure-sdk-for-go](https://github.com/Azure/azure-sdk-for-go).
+This package supports authentication using **a service principal with a secret**, **a workload identity**, and **a managed identity** through [azure-sdk-for-go](https://github.com/Azure/azure-sdk-for-go).
 
 ### Service Principal with a Secret
 
@@ -25,11 +25,13 @@ Then keep the following information to pass to the `Provider` struct fields for 
 - `ClientSecret` (`json:"client_secret"`)
   - [Microsoft Entra ID] > [Manage] > [App registrations] > Your Application > [Manage] > [Certificates & secrets] > [Client secrets] > [Value]
 
-### Managed Identity
+### Workload Identity and Managed Identity
 
-To attempt to authenticate using a managed identity, leave all of `TenantId`, `ClientId`, and `ClientSecret` unset or empty to the `Provider`. If all three values are unset or empty, this package will attempt to authenticate using a managed identity.
+To attempt to authenticate using a workload identity or a managed identity, leave all of `TenantId`, `ClientId`, and `ClientSecret` unset or empty to the `Provider`. If all three values are unset or empty, this package will attempt to authenticate using a workload identity if it is configured, and then using a managed identity.
 
-You will need to assign the **DNS Zone Contributor** role to the managed identity for the DNS zones that you want to manage.
+A workload identity (for example, [Microsoft Entra Workload ID on AKS](https://learn.microsoft.com/en-us/azure/aks/workload-identity-overview)) is used when the environment variables `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_FEDERATED_TOKEN_FILE` are set, which Workload ID sets on your pods. `AZURE_AUTHORITY_HOST` is also used if it is set. If they are not set, only a managed identity is attempted.
+
+You will need to assign the **DNS Zone Contributor** role to the workload identity or the managed identity for the DNS zones that you want to manage.
 
 Then keep the following information to pass to the `Provider` struct fields for authentication:
 
@@ -73,7 +75,7 @@ import (
 func main() {
 
 	// Create new provider instance by authenticating using a service principal with a secret.
-	// To authenticate using a managed identity, remove TenantId, ClientId, and ClientSecret.
+	// To authenticate using a workload identity or a managed identity, remove TenantId, ClientId, and ClientSecret.
 	provider := azure.Provider{
 		SubscriptionId:    os.Getenv("AZURE_SUBSCRIPTION_ID"),
 		ResourceGroupName: os.Getenv("AZURE_RESOURCE_GROUP_NAME"),

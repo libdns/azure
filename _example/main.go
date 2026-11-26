@@ -17,7 +17,7 @@ import (
 func main() {
 
 	// Create new provider instance by authenticating using a service principal with a secret.
-	// To authenticate using a managed identity, remove TenantId, ClientId, and ClientSecret.
+	// To authenticate using a workload identity or a managed identity, remove TenantId, ClientId, and ClientSecret.
 	provider := azure.Provider{
 		SubscriptionId:    os.Getenv("AZURE_SUBSCRIPTION_ID"),
 		ResourceGroupName: os.Getenv("AZURE_RESOURCE_GROUP_NAME"),

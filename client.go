@@ -30,23 +30,9 @@ type Client struct {
 // setupClient invokes authentication and store client to the provider instance.
 func (p *Provider) setupClient() error {
 	if p.client.azureClient == nil {
-		credentials := []azcore.TokenCredential{}
-
-		// If Tenant ID, Client ID, or Client Secret is specified, attempt to authenticate using a client secret.
-		// If not, attempt to authenticate using managed identity.
-		// Authentication using a client secret is prioritized over using managed identiry to keep backward compatibility.
-		if p.TenantId != "" || p.ClientId != "" || p.ClientSecret != "" {
-			clientCredential, err := azidentity.NewClientSecretCredential(p.TenantId, p.ClientId, p.ClientSecret, nil)
-			if err != nil {
-				return err
-			}
-			credentials = append(credentials, clientCredential)
-		} else {
-			managedIdentityCredential, err := azidentity.NewManagedIdentityCredential(nil)
-			if err != nil {
-				return err
-			}
-			credentials = append(credentials, managedIdentityCredential)
+		credentials, err := p.newCredentials()
+		if err != nil {
+			return err
 		}
 
 		chainedTokenCredential, err := azidentity.NewChainedTokenCredential(credentials, nil)
@@ -61,6 +47,38 @@ func (p *Provider) setupClient() error {
 	}
 
 	return nil
+}
+
+// newCredentials returns the credentials to authenticate with, in the order to try them.
+func (p *Provider) newCredentials() ([]azcore.TokenCredential, error) {
+	credentials := []azcore.TokenCredential{}
+
+	// If Tenant ID, Client ID, or Client Secret is specified, attempt to authenticate using a client secret.
+	// If not, attempt to authenticate using workload identity, if it is configured in the environment,
+	// and then using managed identity.
+	// Authentication using a client secret is prioritized over the others to keep backward compatibility.
+	if p.TenantId != "" || p.ClientId != "" || p.ClientSecret != "" {
+		clientCredential, err := azidentity.NewClientSecretCredential(p.TenantId, p.ClientId, p.ClientSecret, nil)
+		if err != nil {
+			return nil, err
+		}
+		credentials = append(credentials, clientCredential)
+	} else {
+		// Not used if it can't be created, which is the case unless the environment variables of
+		// workload identity (AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_FEDERATED_TOKEN_FILE) are set
+		// to valid values, so that existing deployments keep working as they are.
+		if workloadIdentityCredential, err := azidentity.NewWorkloadIdentityCredential(nil); err == nil {
+			credentials = append(credentials, workloadIdentityCredential)
+		}
+
+		managedIdentityCredential, err := azidentity.NewManagedIdentityCredential(nil)
+		if err != nil {
+			return nil, err
+		}
+		credentials = append(credentials, managedIdentityCredential)
+	}
+
+	return credentials, nil
 }
 
 // getRecords gets all records in specified zone on Azure DNS.
