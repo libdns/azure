@@ -98,8 +98,16 @@ func (p *Provider) getRecords(ctx context.Context, zone string) ([]libdns.Record
 // with the same name and type in one record set, so the record is added to
 // the existing set, if any. For example, the ACME challenges of example.com and
 // *.example.com are two TXT values in the same record set.
-func (p *Provider) createRecord(ctx context.Context, zone string, record libdns.Record) (libdns.Record, error) {
-	return record, p.modifyRecordSet(ctx, zone, record, addValues)
+// It reports whether the zone changed, which is not the case if the zone already has the record.
+func (p *Provider) createRecord(ctx context.Context, zone string, record libdns.Record) (bool, error) {
+	recordSet, err := convertLibdnsRecordToAzureRecordSet(record)
+	if err != nil {
+		return false, err
+	}
+	rr := record.RR()
+	return p.modifyRecordSet(ctx, zone, rr.Name, rr.Type, func(dst *armdns.RecordSetProperties) (bool, error) {
+		return addValues(dst, recordSet.Properties)
+	})
 }
 
 // updateRecord creates or updates a record, either by updating existing record or creating new one.
@@ -108,42 +116,22 @@ func (p *Provider) updateRecord(ctx context.Context, zone string, record libdns.
 }
 
 // deleteRecord deletes a record. Other values in the same record set are kept,
-// and the record set is deleted when it becomes empty. A record without data,
-// or a CNAME or SOA record, deletes the whole record set.
-func (p *Provider) deleteRecord(ctx context.Context, zone string, record libdns.Record) (libdns.Record, error) {
+// and the record set is deleted when it becomes empty. The TTL is not compared,
+// because Azure has a single TTL per record set. A record without data deletes
+// the whole record set.
+// It reports whether the zone changed, which is not the case if the zone doesn't have the record.
+func (p *Provider) deleteRecord(ctx context.Context, zone string, record libdns.Record) (bool, error) {
 	rr := record.RR()
-	if rr.Data == "" || rr.Type == "CNAME" || rr.Type == "SOA" {
-		return record, p.deleteRecordSet(ctx, zone, record)
+	if rr.Data == "" {
+		return p.modifyRecordSet(ctx, zone, rr.Name, rr.Type, removeAll)
 	}
-	return record, p.modifyRecordSet(ctx, zone, record, removeValues)
-}
-
-// deleteRecordSet deletes the record set with the name and type of record.
-func (p *Provider) deleteRecordSet(ctx context.Context, zone string, record libdns.Record) error {
-	p.client.mutex.Lock()
-	defer p.client.mutex.Unlock()
-
-	if err := p.setupClient(); err != nil {
-		return err
-	}
-
-	rr := record.RR()
-	recordType, err := convertStringToRecordType(rr.Type)
+	recordSet, err := convertLibdnsRecordToAzureRecordSet(record)
 	if err != nil {
-		return err
+		return false, err
 	}
-
-	_, err = p.client.azureClient.Delete(
-		ctx,
-		p.ResourceGroupName,
-		strings.TrimSuffix(zone, "."),
-		generateRecordSetName(rr.Name, zone),
-		recordType,
-		&armdns.RecordSetsClientDeleteOptions{
-			IfMatch: nil,
-		},
-	)
-	return err
+	return p.modifyRecordSet(ctx, zone, rr.Name, rr.Type, func(dst *armdns.RecordSetProperties) (bool, error) {
+		return removeValues(dst, recordSet.Properties)
+	})
 }
 
 // createOrUpdateRecord creates or updates a record.
@@ -190,35 +178,33 @@ func (p *Provider) createOrUpdateRecord(ctx context.Context, zone string, record
 // someone else changed it in between.
 const maxAttempts = 10
 
-// modifyRecordSet adds record's value to its record set, or removes it, without
-// touching the other values. The write is conditional on the record set's etag,
-// so concurrent changes, also from other processes, are not lost.
-func (p *Provider) modifyRecordSet(ctx context.Context, zone string, record libdns.Record, change func(dst, src *armdns.RecordSetProperties) error) error {
+// modifyRecordSet changes the values of a record set without touching the
+// others. The write is conditional on the record set's etag, so concurrent
+// changes, also from other processes, are not lost. change edits the current
+// values, which are empty if the record set doesn't exist, and reports whether
+// it changed anything. Nothing is written otherwise. modifyRecordSet reports
+// the same.
+func (p *Provider) modifyRecordSet(ctx context.Context, zone, name, typeName string, change func(properties *armdns.RecordSetProperties) (bool, error)) (bool, error) {
 	p.client.mutex.Lock()
 	defer p.client.mutex.Unlock()
 
 	if err := p.setupClient(); err != nil {
-		return err
+		return false, err
 	}
 
-	rr := record.RR()
-	recordType, err := convertStringToRecordType(rr.Type)
+	recordType, err := convertStringToRecordType(typeName)
 	if err != nil {
-		return err
-	}
-	recordSet, err := convertLibdnsRecordToAzureRecordSet(record)
-	if err != nil {
-		return err
+		return false, err
 	}
 	zoneName := strings.TrimSuffix(zone, ".")
-	recordSetName := generateRecordSetName(rr.Name, zone)
+	recordSetName := generateRecordSetName(name, zone)
 
 	for attempt := range maxAttempts {
 		if attempt > 0 {
 			// Jitter, so writers that keep conflicting spread out.
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return false, ctx.Err()
 			case <-time.After(rand.N(time.Duration(attempt) * 50 * time.Millisecond)):
 			}
 		}
@@ -233,25 +219,24 @@ func (p *Provider) modifyRecordSet(ctx context.Context, zone string, record libd
 		)
 		missing := hasStatus(err, http.StatusNotFound)
 		if err != nil && !missing {
-			return err
+			return false, err
 		}
 
-		properties := &armdns.RecordSetProperties{
-			TTL: recordSet.Properties.TTL,
-		}
+		properties := &armdns.RecordSetProperties{}
 		var etag *string
 		if !missing && current.Properties != nil {
 			properties = copyRecordSetProperties(current.Properties)
 			etag = current.Etag
 		}
-		if err := change(properties, recordSet.Properties); err != nil {
-			return fmt.Errorf("%s record set %q: %w", recordType, recordSetName, err)
+		changed, err := change(properties)
+		if err != nil {
+			return false, fmt.Errorf("%s record set %q: %w", recordType, recordSetName, err)
+		}
+		if !changed {
+			return false, nil
 		}
 
 		if isEmpty(properties) {
-			if missing {
-				return nil
-			}
 			_, err = p.client.azureClient.Delete(
 				ctx,
 				p.ResourceGroupName,
@@ -282,11 +267,11 @@ func (p *Provider) modifyRecordSet(ctx context.Context, zone string, record libd
 			)
 		}
 		if !hasStatus(err, http.StatusPreconditionFailed) {
-			return err
+			return err == nil, err
 		}
 	}
 
-	return fmt.Errorf("%s record set %q kept changing, gave up after %d attempts", recordType, recordSetName, maxAttempts)
+	return false, fmt.Errorf("%s record set %q kept changing, gave up after %d attempts", recordType, recordSetName, maxAttempts)
 }
 
 // hasStatus reports whether err is an Azure API error with the given HTTP status.
@@ -326,17 +311,38 @@ func isEmpty(p *armdns.RecordSetProperties) bool {
 		len(p.TxtRecords) == 0 && p.TargetResource == nil
 }
 
+// countValues returns the number of values in a record set.
+func countValues(p *armdns.RecordSetProperties) int {
+	n := len(p.ARecords) + len(p.AaaaRecords) + len(p.CaaRecords) + len(p.MxRecords) +
+		len(p.NsRecords) + len(p.PtrRecords) + len(p.SrvRecords) + len(p.TxtRecords)
+	if p.CnameRecord != nil {
+		n++
+	}
+	if p.SoaRecord != nil {
+		n++
+	}
+	return n
+}
+
 // addValues adds the values of src to dst, skipping the ones dst already has.
-func addValues(dst, src *armdns.RecordSetProperties) error {
+// It reports whether dst changed. The TTL of dst is kept, unless dst was empty.
+func addValues(dst, src *armdns.RecordSetProperties) (bool, error) {
+	if isEmpty(dst) {
+		dst.TTL = src.TTL
+	}
 	if src.CnameRecord != nil || src.SoaRecord != nil {
 		// A record set holds a single CNAME or SOA value.
 		if !isEmpty(dst) {
-			return errors.New("already exists")
+			if sameCNAME(dst.CnameRecord, src.CnameRecord) && sameSOA(dst.SoaRecord, src.SoaRecord) {
+				return false, nil
+			}
+			return false, errors.New("already exists")
 		}
 		dst.CnameRecord = src.CnameRecord
 		dst.SoaRecord = src.SoaRecord
-		return nil
+		return true, nil
 	}
+	before := countValues(dst)
 	dst.ARecords = appendMissing(dst.ARecords, src.ARecords, sameA)
 	dst.AaaaRecords = appendMissing(dst.AaaaRecords, src.AaaaRecords, sameAAAA)
 	dst.CaaRecords = appendMissing(dst.CaaRecords, src.CaaRecords, sameCAA)
@@ -345,11 +351,18 @@ func addValues(dst, src *armdns.RecordSetProperties) error {
 	dst.PtrRecords = appendMissing(dst.PtrRecords, src.PtrRecords, samePTR)
 	dst.SrvRecords = appendMissing(dst.SrvRecords, src.SrvRecords, sameSRV)
 	dst.TxtRecords = appendMissing(dst.TxtRecords, src.TxtRecords, sameTXT)
-	return nil
+	return countValues(dst) != before, nil
 }
 
-// removeValues removes the values of src from dst.
-func removeValues(dst, src *armdns.RecordSetProperties) error {
+// removeValues removes the values of src from dst. It reports whether dst changed.
+func removeValues(dst, src *armdns.RecordSetProperties) (bool, error) {
+	before := countValues(dst)
+	if sameCNAME(dst.CnameRecord, src.CnameRecord) {
+		dst.CnameRecord = nil
+	}
+	if sameSOA(dst.SoaRecord, src.SoaRecord) {
+		dst.SoaRecord = nil
+	}
 	dst.ARecords = deleteMatching(dst.ARecords, src.ARecords, sameA)
 	dst.AaaaRecords = deleteMatching(dst.AaaaRecords, src.AaaaRecords, sameAAAA)
 	dst.CaaRecords = deleteMatching(dst.CaaRecords, src.CaaRecords, sameCAA)
@@ -358,7 +371,14 @@ func removeValues(dst, src *armdns.RecordSetProperties) error {
 	dst.PtrRecords = deleteMatching(dst.PtrRecords, src.PtrRecords, samePTR)
 	dst.SrvRecords = deleteMatching(dst.SrvRecords, src.SrvRecords, sameSRV)
 	dst.TxtRecords = deleteMatching(dst.TxtRecords, src.TxtRecords, sameTXT)
-	return nil
+	return countValues(dst) != before, nil
+}
+
+// removeAll removes all the values from dst. It reports whether dst changed.
+func removeAll(dst *armdns.RecordSetProperties) (bool, error) {
+	changed := !isEmpty(dst)
+	*dst = armdns.RecordSetProperties{}
+	return changed, nil
 }
 
 // appendMissing appends the values of src that dst does not have yet.
@@ -397,6 +417,24 @@ func sameCAA(a, b *armdns.CaaRecord) bool {
 
 func sameMX(a, b *armdns.MxRecord) bool {
 	return val(a.Preference) == val(b.Preference) && val(a.Exchange) == val(b.Exchange)
+}
+
+// sameCNAME and sameSOA treat two missing values as the same.
+func sameCNAME(a, b *armdns.CnameRecord) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return val(a.Cname) == val(b.Cname)
+}
+
+func sameSOA(a, b *armdns.SoaRecord) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return val(a.Host) == val(b.Host) && val(a.Email) == val(b.Email) &&
+		val(a.SerialNumber) == val(b.SerialNumber) && val(a.RefreshTime) == val(b.RefreshTime) &&
+		val(a.RetryTime) == val(b.RetryTime) && val(a.ExpireTime) == val(b.ExpireTime) &&
+		val(a.MinimumTTL) == val(b.MinimumTTL)
 }
 
 func sameNS(a, b *armdns.NsRecord) bool { return val(a.Nsdname) == val(b.Nsdname) }

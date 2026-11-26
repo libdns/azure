@@ -47,15 +47,18 @@ func (p *Provider) GetRecords(ctx context.Context, zone string) ([]libdns.Record
 }
 
 // AppendRecords adds records to the zone. It returns the records that were added.
+// A record that the zone already has is not added again, and not returned.
 func (p *Provider) AppendRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
 	var createdRecords []libdns.Record
 
 	for _, record := range records {
-		createdRecord, err := p.createRecord(ctx, zone, record)
+		created, err := p.createRecord(ctx, zone, record)
 		if err != nil {
 			return nil, err
 		}
-		createdRecords = append(createdRecords, createdRecord)
+		if created {
+			createdRecords = append(createdRecords, record)
+		}
 	}
 
 	return createdRecords, nil
@@ -77,17 +80,21 @@ func (p *Provider) SetRecords(ctx context.Context, zone string, records []libdns
 	return updatedRecords, nil
 }
 
-// DeleteRecords deletes the records from the zone. If a record does not have an ID,
-// it will be looked up. It returns the records that were deleted.
+// DeleteRecords deletes the records from the zone. It returns the records that were deleted.
+// A record that the zone doesn't have is ignored, and not returned. The TTL is not compared,
+// because Azure has a single TTL per record set. A record without data deletes the whole
+// record set.
 func (p *Provider) DeleteRecords(ctx context.Context, zone string, records []libdns.Record) ([]libdns.Record, error) {
 	var deletedRecords []libdns.Record
 
 	for _, record := range records {
-		deletedRecord, err := p.deleteRecord(ctx, zone, record)
+		deleted, err := p.deleteRecord(ctx, zone, record)
 		if err != nil {
 			return nil, err
 		}
-		deletedRecords = append(deletedRecords, deletedRecord)
+		if deleted {
+			deletedRecords = append(deletedRecords, record)
+		}
 	}
 
 	return deletedRecords, nil

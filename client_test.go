@@ -329,8 +329,8 @@ func Test_updateRecord(t *testing.T) {
 
 func Test_deleteRecord(t *testing.T) {
 	provider := getFakeProvider()
-	record, err := provider.deleteRecord(context.TODO(), "example.com.", libdnsFakeRecords[0])
-	t.Log(record)
+	deleted, err := provider.deleteRecord(context.TODO(), "example.com.", libdnsFakeRecords[0])
+	t.Log(deleted)
 	if err != nil {
 		t.Errorf("%s", err)
 	}
@@ -646,18 +646,23 @@ func Test_modifyRecordSet_concurrentChange(t *testing.T) {
 	tests := []struct {
 		name   string
 		append bool
+		seed   []string
 		want   []string
 	}{
-		{name: "append", append: true, want: []string{"mine", "other", "theirs"}},
-		{name: "delete", append: false, want: []string{"other", "theirs"}},
+		{name: "append", append: true, seed: []string{"other"}, want: []string{"mine", "other", "theirs"}},
+		{name: "delete", append: false, seed: []string{"mine", "other"}, want: []string{"other", "theirs"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			z := newFakeZoneServer()
 			p := getFakeZoneProvider(t, z)
+			seed := []*armdns.TxtRecord{}
+			for _, v := range tt.seed {
+				seed = append(seed, &armdns.TxtRecord{Value: []*string{to.Ptr(v)}})
+			}
 			z.put("_acme-challenge", armdns.RecordTypeTXT, &armdns.RecordSetProperties{
 				TTL:        to.Ptr[int64](60),
-				TxtRecords: []*armdns.TxtRecord{{Value: []*string{to.Ptr("mine")}}, {Value: []*string{to.Ptr("other")}}},
+				TxtRecords: seed,
 			})
 			z.beforeWrite = func() {
 				set := z.sets[setKey("_acme-challenge", armdns.RecordTypeTXT)]
@@ -718,4 +723,115 @@ func Test_createRecord_existingCNAME(t *testing.T) {
 	if _, err := p.AppendRecords(context.TODO(), "example.com.", []libdns.Record{rec}); err == nil {
 		t.Error("appending a second CNAME succeeded")
 	}
+}
+
+func Test_AppendRecords_returnsAdded(t *testing.T) {
+	z := newFakeZoneServer()
+	p := getFakeZoneProvider(t, z)
+	a, b := fakeChallengeRecord("a"), fakeChallengeRecord("b")
+	steps := []struct {
+		name    string
+		records []libdns.Record
+		want    []libdns.Record
+	}{
+		{name: "new value", records: []libdns.Record{a}, want: []libdns.Record{a}},
+		{name: "existing value", records: []libdns.Record{a}, want: nil},
+		{name: "existing and new value", records: []libdns.Record{a, b}, want: []libdns.Record{b}},
+	}
+	for _, s := range steps {
+		got, err := p.AppendRecords(context.TODO(), "example.com.", s.records)
+		if err != nil {
+			t.Fatalf("%s: %s", s.name, err)
+		}
+		if diff := cmp.Diff(got, s.want); diff != "" {
+			t.Errorf("%s: diff: %s", s.name, diff)
+		}
+	}
+}
+
+func Test_DeleteRecords_matching(t *testing.T) {
+	cname := libdns.CNAME{Name: "www", TTL: time.Minute, Target: "a.example.com."}
+	otherCname := libdns.CNAME{Name: "www", TTL: time.Minute, Target: "b.example.com."}
+	tests := []struct {
+		name    string
+		records []libdns.Record
+		delete  libdns.Record
+		deleted bool
+		want    []string
+	}{{
+		name:    "missing record set",
+		delete:  fakeChallengeRecord("a"),
+		deleted: false,
+		want:    nil,
+	}, {
+		name:    "missing value",
+		records: []libdns.Record{fakeChallengeRecord("a")},
+		delete:  fakeChallengeRecord("b"),
+		deleted: false,
+		want:    []string{"a"},
+	}, {
+		name:    "other TTL",
+		records: []libdns.Record{fakeChallengeRecord("a"), fakeChallengeRecord("b")},
+		delete:  libdns.TXT{Name: "_acme-challenge", TTL: time.Hour, Text: "a"},
+		deleted: true,
+		want:    []string{"b"},
+	}, {
+		name:    "no data deletes the record set",
+		records: []libdns.Record{fakeChallengeRecord("a"), fakeChallengeRecord("b")},
+		delete:  libdns.RR{Name: "_acme-challenge", Type: "TXT"},
+		deleted: true,
+		want:    nil,
+	}, {
+		name:    "no data and missing record set",
+		delete:  libdns.RR{Name: "_acme-challenge", Type: "TXT"},
+		deleted: false,
+		want:    nil,
+	}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			z := newFakeZoneServer()
+			p := getFakeZoneProvider(t, z)
+			if len(tt.records) > 0 {
+				if _, err := p.AppendRecords(context.TODO(), "example.com.", tt.records); err != nil {
+					t.Fatalf("%s", err)
+				}
+			}
+			got, err := p.DeleteRecords(context.TODO(), "example.com.", []libdns.Record{tt.delete})
+			if err != nil {
+				t.Fatalf("%s", err)
+			}
+			var want []libdns.Record
+			if tt.deleted {
+				want = []libdns.Record{tt.delete}
+			}
+			if diff := cmp.Diff(got, want); diff != "" {
+				t.Errorf("deleted records diff: %s", diff)
+			}
+			if diff := cmp.Diff(z.txtValues("_acme-challenge"), tt.want); diff != "" {
+				t.Errorf("remaining values diff: %s", diff)
+			}
+		})
+	}
+
+	t.Run("CNAME", func(t *testing.T) {
+		z := newFakeZoneServer()
+		p := getFakeZoneProvider(t, z)
+		if _, err := p.AppendRecords(context.TODO(), "example.com.", []libdns.Record{cname}); err != nil {
+			t.Fatalf("%s", err)
+		}
+		deleted, err := p.DeleteRecords(context.TODO(), "example.com.", []libdns.Record{otherCname})
+		if err != nil || len(deleted) != 0 {
+			t.Errorf("deleting a CNAME with another target: got %v, %v; want nothing", deleted, err)
+		}
+		if _, ok := z.sets[setKey("www", armdns.RecordTypeCNAME)]; !ok {
+			t.Fatal("the CNAME was deleted")
+		}
+		deleted, err = p.DeleteRecords(context.TODO(), "example.com.", []libdns.Record{cname})
+		if err != nil || len(deleted) != 1 {
+			t.Errorf("deleting the CNAME: got %v, %v; want the CNAME", deleted, err)
+		}
+		if _, ok := z.sets[setKey("www", armdns.RecordTypeCNAME)]; ok {
+			t.Error("the CNAME was not deleted")
+		}
+	})
 }

@@ -41,6 +41,14 @@ Then keep the following information to pass to the `Provider` struct fields for 
 > [!NOTE]
 > If this package is running outside of an Azure VM like Azure Arc, ensure required environment variables to use a managed identity (`IDENTITY_ENDPOINT`, `IMDS_ENDPOINT`, etc.) are available on your resources. [azure-sdk-for-go](https://github.com/Azure/azure-sdk-for-go) uses some environment variables to determine the endpoint for IMDS or HIMDS, and this package is also in the same manner. Refer to the Azure documentation for each services to use a managed identity.
 
+## Record Sets
+
+Azure DNS keeps all records with the same name and type in one record set, which has a single TTL. This package maps the `libdns` interfaces to record sets as follows:
+
+- `AppendRecords` adds the values to the existing record set, or creates it. Values that the record set already has are skipped and not returned. The TTL of an existing record set is kept.
+- `DeleteRecords` removes only the given values, and deletes the record set when no value is left. Values that the record set doesn't have are skipped and not returned. The TTL is not compared. A record with empty data deletes the whole record set.
+- `AppendRecords` and `DeleteRecords` are safe against concurrent changes, also from other processes.
+
 ## Example
 
 Here's a minimal example of how to get all your DNS records using this `libdns` provider (see `_example/main.go`)
